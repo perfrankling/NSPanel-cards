@@ -110,6 +110,10 @@
     <div class="cap">swipe - the panel's own pager: two pages, dots at the bottom</div>
   </div>
   <div>
+    <div class="panel" id="p-camera"><div class="stack" id="s-camera"></div></div>
+    <div class="cap">camera - a still that refreshes only while it is on screen</div>
+  </div>
+  <div>
     <div class="panel" id="p-status"><div class="stack" id="s-status"></div></div>
     <div class="cap">Status</div>
   </div>
@@ -231,6 +235,8 @@ const hass = {
     'input_boolean.guest_mode': st('input_boolean.guest_mode', 'on', { friendly_name: 'Guest mode' }),
     'fan.bedroom': st('fan.bedroom', 'off', { friendly_name: 'Bedroom fan' }),
     'switch.dead': st('switch.dead', 'unavailable', { friendly_name: 'Pond pump' }),
+    'camera.front_door': st('camera.front_door', 'idle', { friendly_name: 'Front door',
+      access_token: 'bench', entity_picture: 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20640%20400%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22s%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%238fb4d9%22/%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23dfe9f2%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width%3D%22640%22%20height%3D%22400%22%20fill%3D%22url%28%23s%29%22/%3E%3Crect%20y%3D%22270%22%20width%3D%22640%22%20height%3D%22130%22%20fill%3D%22%236f7f5c%22/%3E%3Cpolygon%20points%3D%220%2C400%20240%2C270%20400%2C270%20640%2C400%22%20fill%3D%22%239a9488%22/%3E%3Crect%20x%3D%2240%22%20y%3D%22120%22%20width%3D%22150%22%20height%3D%22160%22%20fill%3D%22%23b7a58c%22/%3E%3Cpolygon%20points%3D%2230%2C120%20115%2C60%20200%2C120%22%20fill%3D%22%237a4b3a%22/%3E%3Crect%20x%3D%2295%22%20y%3D%22200%22%20width%3D%2240%22%20height%3D%2280%22%20fill%3D%22%234a3a30%22/%3E%3Ccircle%20cx%3D%22520%22%20cy%3D%22230%22%20r%3D%2246%22%20fill%3D%22%233f6b3a%22/%3E%3Crect%20x%3D%22513%22%20y%3D%22250%22%20width%3D%2214%22%20height%3D%2250%22%20fill%3D%22%234a3a30%22/%3E%3Crect%20x%3D%22290%22%20y%3D%22236%22%20width%3D%2260%22%20height%3D%2234%22%20rx%3D%228%22%20fill%3D%22%23c0392b%22/%3E%3Ccircle%20cx%3D%22302%22%20cy%3D%22272%22%20r%3D%229%22%20fill%3D%22%23222%22/%3E%3Ccircle%20cx%3D%22338%22%20cy%3D%22272%22%20r%3D%229%22%20fill%3D%22%23222%22/%3E%3C/svg%3E' }),
     'alarm_control_panel.home': st('alarm_control_panel.home', 'disarmed',
       { friendly_name: 'Home Alarm', code_format: 'number', code_arm_required: false,
         supported_features: 7 }),
@@ -379,6 +385,14 @@ card('nspanel-button-card', {
     { entity: 'script.leaving', name: 'Leaving', icon: 'mdi:lock' },
   ],
 }, document.getElementById('s-scenes'));
+
+card('nspanel-camera-card', {
+  entity: 'camera.front_door', height: 300,
+}, document.getElementById('s-camera'));
+card('nspanel-switch-card', {
+  height: 144, columns: 3, show_name: false, show_state: false,
+  switches: ['switch.garden_lights', 'switch.fountain', 'input_boolean.guest_mode'],
+}, document.getElementById('s-camera'));
 
 card('nspanel-swipe-card', {
   dots: true, card_spacing: 12,

@@ -45,7 +45,7 @@
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
  */
 
-const NSPANEL_VERSION = '0.10.0';
+const NSPANEL_VERSION = '0.11.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2118,6 +2118,7 @@ class NsPanelButtonCard extends NsInfoCard {
 
 const SWITCH_CSS = `
 .btn .st { font-size: 14px; line-height: 18px; color: var(--ns-muted); }
+.btn.nostate .st { display: none; }
 .btn.on { background: var(--ns-accent-dim); }
 .btn.on ha-icon, .btn.on .bl { color: var(--ns-accent); }
 .pad[data-cols="3"] .btn .st { font-size: 13px; line-height: 16px; }
@@ -2146,7 +2147,7 @@ class NsPanelSwitchCard extends NsInfoCard {
   static get defaultOptions() {
     return {
       switches: [], columns: 2, haptics: true, echo_ms: 1500,
-      on_text: 'On', off_text: 'Off', more_info: true,
+      on_text: 'On', off_text: 'Off', more_info: true, show_name: true, show_state: true,
     };
   }
 
@@ -2241,9 +2242,13 @@ class NsPanelSwitchCard extends NsInfoCard {
     pad.style.setProperty('--ns-cols', String(this._columns));
     pad.setAttribute('data-cols', String(this._columns));
 
+    const flag = (item, key) => (item[key] === undefined ? !!this._config[key] : !!item[key]);
     this._btns = this._items.map((item) => {
       const el = document.createElement('button');
-      el.className = 'btn';
+      // without the name the icon takes its room; without both the tile is
+      // the icon alone, and the lit colour is the state
+      el.className = 'btn' + (flag(item, 'show_name') ? '' : ' nolabel') +
+        (flag(item, 'show_state') ? '' : ' nostate');
       el.innerHTML = '<ha-icon></ha-icon><div class="bl"></div><div class="st"></div>';
       const b = {
         item, el,
@@ -3838,6 +3843,9 @@ const EDITOR_LABELS = {
   on_text: 'Text while on',
   off_text: 'Text while off',
   show_name: 'Show names',
+  show_state: 'Show the state line',
+  interval: 'Seconds between pictures',
+  fit: 'Picture fit',
   state_entity: 'Lit while this entity is on',
   dots: 'Page dots',
   start: 'Start on page',
@@ -4237,6 +4245,22 @@ const BUTTON_SCHEMA = [
 
 /* The pages are whole cards, which no form draws: the object selector with
    no fields is HA's YAML box. */
+const CAMERA_SCHEMA = INFO_SCHEMA.concat([
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'interval', selector: { number: { min: 0.2, max: 60, step: 0.1, mode: 'box' } } },
+      {
+        name: 'fit',
+        selector: { select: { mode: 'dropdown', options: [
+          { value: 'cover', label: 'Fill the card (crop)' },
+          { value: 'contain', label: 'Whole picture' },
+        ] } },
+      },
+      { name: 'show_name', selector: { boolean: {} } },
+    ],
+  },
+]);
+
 const SWIPE_SCHEMA = [
   {
     name: '', type: 'grid', schema: [
@@ -4262,6 +4286,8 @@ const SWITCH_SCHEMA = [
       entity: { required: true, selector: { entity: { domain: SWITCH_DOMAINS } } },
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
+      show_name: { selector: { boolean: {} } },
+      show_state: { selector: { boolean: {} } },
     }, 'name', 'entity'),
   },
   {
@@ -4270,6 +4296,8 @@ const SWITCH_SCHEMA = [
       { name: 'echo_ms', selector: { number: { min: 0, max: 5000, step: 100, mode: 'box' } } },
       { name: 'haptics', selector: { boolean: {} } },
       { name: 'more_info', selector: { boolean: {} } },
+      { name: 'show_name', selector: { boolean: {} } },
+      { name: 'show_state', selector: { boolean: {} } },
     ],
   },
   {
@@ -4330,6 +4358,16 @@ class NsPanelSwitchCardEditor extends NsBaseCardEditor {
   static get rows() { return SWITCH_SCHEMA; }
   static get note() {
     return 'One switch: pick the entity. Several: add them under Switches, which then wins.';
+  }
+}
+
+class NsPanelCameraCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-camera-card'; }
+  static get domain() { return 'camera'; }
+  static get rows() { return CAMERA_SCHEMA; }
+  static get note() {
+    return 'A still, refreshed while the card is on screen and never otherwise. ' +
+      'Tap opens the live view in Home Assistant.';
   }
 }
 
@@ -4400,6 +4438,164 @@ class NsPanelClockCardEditor extends NsBaseCardEditor {
   static get note() {
     return 'The entity is optional: pick a calendar or sensor to print a line ' +
       'under the clock, or leave it empty for just the time.';
+  }
+}
+
+/* ================================================================== *
+ * Camera card - a doorbell, a driveway, on the wall
+ *
+ * Not video. A still from Home Assistant's camera proxy, asked for at the
+ * card's own size and replaced about once a second, and only while the
+ * card is actually on screen: an IntersectionObserver starts and stops it,
+ * so a camera on page three costs nothing while page one is showing. That
+ * is what this hardware can afford - no decoder, no stream held open - and
+ * it works for every camera HA has, whatever it speaks upstream. The next
+ * picture is requested when the last one has arrived, so a slow network
+ * slows the pictures down rather than piling requests up.
+ * ================================================================== */
+
+const CAMERA_CSS = `
+.cam {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+.cam.contain { object-fit: contain; }
+.cscrim {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 72px;
+  background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
+  pointer-events: none;
+}
+.cl {
+  position: absolute; left: 20px; right: 20px; bottom: 14px;
+  font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+  color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  pointer-events: none;
+}
+.cempty {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: var(--ns-muted); font-size: 15px;
+}
+.cempty ha-icon { --mdc-icon-size: 44px; }
+`;
+
+class NsPanelCameraCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-camera-card'; }
+  static get extraCss() { return CAMERA_CSS; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() { return { interval: 1, fit: 'cover', show_name: true }; }
+
+  static getStubConfig(hass) {
+    const found = hass && hass.states
+      ? Object.keys(hass.states).find((e) => e.indexOf('camera.') === 0)
+      : null;
+    return { entity: found || 'camera.example', height: 300 };
+  }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="cempty"><ha-icon icon="mdi:cctv"></ha-icon><div class="ct"></div></div>
+        <img class="cam ${this._config.fit === 'contain' ? 'contain' : ''}" alt="" hidden>
+        <div class="cscrim" hidden></div>
+        <div class="cl" hidden></div>
+      </div>
+    `;
+    this._card = this.shadowRoot.querySelector('.card');
+    this._img = this.shadowRoot.querySelector('.cam');
+    this._elEmpty = this.shadowRoot.querySelector('.cempty');
+    this._elEmptyText = this.shadowRoot.querySelector('.ct');
+    this._elScrim = this.shadowRoot.querySelector('.cscrim');
+    this._elLabel = this.shadowRoot.querySelector('.cl');
+    this._bindMoreInfo(this._card);
+    this._img.addEventListener('load', () => {
+      this._fails = 0;
+      this._img.hidden = false;
+      this._elEmpty.hidden = true;
+      this._again(this._intervalMs());
+    });
+    this._img.addEventListener('error', () => {
+      this._fails = (this._fails || 0) + 1;
+      if (this._fails >= 3) { this._img.hidden = true; this._elEmpty.hidden = false; }
+      this._again(Math.max(3000, this._intervalMs()));
+    });
+    this._watch();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._watch();
+  }
+
+  _teardown() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (this._io) { this._io.disconnect(); this._io = null; }
+    this._visible = false;
+    this._waiting = false;
+  }
+
+  _intervalMs() { return Math.round(clamp(Number(this._config.interval) || 1, 0.2, 3600) * 1000); }
+
+  /* On screen is the only time this card asks for anything. */
+  _watch() {
+    if (this._io || !this._built || !this.isConnected) return;
+    if (typeof IntersectionObserver === 'undefined') { this._visible = true; this._poll(); return; }
+    this._io = new IntersectionObserver((entries) => {
+      const now = entries[entries.length - 1].isIntersecting;
+      if (now === this._visible) return;
+      this._visible = now;
+      if (now) this._poll();
+      else if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    }, { threshold: 0.2 });
+    this._io.observe(this);
+  }
+
+  _again(ms) {
+    this._waiting = false;
+    if (this._timer) clearTimeout(this._timer);
+    this._timer = setTimeout(() => { this._timer = null; this._poll(); }, ms);
+  }
+
+  _poll() {
+    if (!this._visible || !this.isConnected || this._waiting || !this._img) return;
+    if (document.hidden) { this._again(1000); return; }
+    const s = this._stateObj;
+    if (!s || s.state === 'unavailable') { this._again(3000); return; }
+    const a = s.attributes || {};
+    let url;
+    if (a.entity_picture && String(a.entity_picture).indexOf('data:') === 0) {
+      url = a.entity_picture; // the preview bench; a real camera never has one
+    } else {
+      // at the card's own size: HA scales the still, so a 4 MP camera does not
+      // send 1.5 MB to a 480 px panel every second
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.max(160, Math.round(this.clientWidth * dpr));
+      const h = Math.max(120, Math.round(this.clientHeight * dpr));
+      const path = '/api/camera_proxy/' + this._config.entity + '?token=' + (a.access_token || '') +
+        '&width=' + w + '&height=' + h + '&t=' + Date.now();
+      url = this._hass && typeof this._hass.hassUrl === 'function' ? this._hass.hassUrl(path) : path;
+    }
+    this._waiting = true;
+    if (this._img.src === url) { this._again(this._intervalMs()); return; }
+    this._img.src = url;
+  }
+
+  _render() {
+    if (!this._elLabel) return;
+    const s = this._stateObj;
+    const gone = !s || s.state === 'unavailable';
+    const show = !!this._config.show_name;
+    this._elLabel.hidden = !show;
+    this._elScrim.hidden = !show || this._img.hidden;
+    this._elLabel.textContent = this._title();
+    this._elEmptyText.textContent = gone ? 'Camera unavailable' : 'Loading\u2026';
+    // the first hass is when the camera's token arrives
+    if (this._visible && !this._waiting && !this._timer) this._poll();
   }
 }
 
@@ -4609,6 +4805,7 @@ customElements.define('nspanel-status-card', NsPanelStatusCard);
 customElements.define('nspanel-weather-card', NsPanelWeatherCard);
 customElements.define('nspanel-clock-card', NsPanelClockCard);
 customElements.define('nspanel-swipe-card', NsPanelSwipeCard);
+customElements.define('nspanel-camera-card', NsPanelCameraCard);
 customElements.define('nspanel-screensaver', NsPanelScreensaverCard);
 
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
@@ -4618,6 +4815,7 @@ customElements.define('nspanel-media-card-editor', NsPanelMediaCardEditor);
 customElements.define('nspanel-button-card-editor', NsPanelButtonCardEditor);
 customElements.define('nspanel-switch-card-editor', NsPanelSwitchCardEditor);
 customElements.define('nspanel-swipe-card-editor', NsPanelSwipeCardEditor);
+customElements.define('nspanel-camera-card-editor', NsPanelCameraCardEditor);
 customElements.define('nspanel-alarm-card-editor', NsPanelAlarmCardEditor);
 customElements.define('nspanel-sensor-card-editor', NsPanelSensorCardEditor);
 customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
@@ -4655,6 +4853,12 @@ window.customCards.push(
     type: 'nspanel-button-card',
     name: 'NSPanel Button',
     description: 'Scenes, scripts and automations. Big targets, and it tells you the tap landed.',
+    preview: true,
+  },
+  {
+    type: 'nspanel-camera-card',
+    name: 'NSPanel Camera',
+    description: 'A camera as a still that refreshes only while it is on screen. Made for a doorbell page.',
     preview: true,
   },
   {
@@ -4733,6 +4937,7 @@ window.NsPanelCards = {
   NsPanelButtonCard,
   NsPanelSwitchCard,
   NsPanelSwipeCard,
+  NsPanelCameraCard,
   NsPanelAlarmCard,
   NsPanelSensorCard,
   NsPanelSensorsCard,
@@ -4747,6 +4952,7 @@ window.NsPanelCards = {
   NsPanelButtonCardEditor,
   NsPanelSwitchCardEditor,
   NsPanelSwipeCardEditor,
+  NsPanelCameraCardEditor,
   NsPanelAlarmCardEditor,
   NsPanelSensorCardEditor,
   NsPanelSensorsCardEditor,

@@ -50,6 +50,7 @@ It starts with installing these cards.
 | Card | What it does |
 | --- | --- |
 | `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–3 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
+| `custom:nspanel-camera-card` | A camera on the wall: a still at the card's own size, refreshed about once a second, and only while its page is on screen. Made for a doorbell page. |
 | `custom:nspanel-swipe-card` | Pages side by side, swiped, with dots. The panel's own pager, so nothing else from HACS is needed; the native app reads it as its list of pages. |
 | `custom:nspanel-switch-card` | Switches, input booleans, fans: the same grid, but each tile reflects its entity — lit while on — and a tap turns it the other way, echoed at once. |
 | `custom:nspanel-alarm-card` | Arm and disarm an alarm. A button per mode, one Disarm when it is set, and a full-screen keypad when the alarm wants a code. |
@@ -109,7 +110,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.10.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.11.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -489,12 +490,94 @@ greyed out and says so. A long-press opens more-info.
 | `switches` | — | up to 6; `entity` alone is the one-switch shorthand |
 | `columns` | `2` | 1–3, capped at the number of switches; a row is always shared |
 | `echo_ms` | `1500` | how long the tap's state outranks Home Assistant's |
+| `show_name` | `true` | `false` hides the name; also settable per switch |
+| `show_state` | `true` | `false` hides the On/Off line; with both off the tile is the icon alone, lit while on |
 | `on_text` | `On` | the line under the name while on |
 | `off_text` | `Off` | the line under the name while off |
 | `haptics` | `true` | |
 | `more_info` | `true` | long-press opens the dialog |
 
-Per switch: `entity`, `name`, `icon`.
+Per switch: `entity`, `name`, `icon`, `show_name`, `show_state`.
+
+### Camera
+
+<table>
+<tr>
+<td valign="top">
+
+```yaml
+type: custom:nspanel-camera-card
+entity: camera.doorbell
+title: Front door
+height: 300
+interval: 1        # seconds between pictures; default 1
+fit: cover         # fill the card and crop (default), or contain
+show_name: true    # the name over the picture; default true
+```
+
+</td>
+<td><img src="docs/images/camera.png" alt="A camera card showing a driveway with the name Front door over the picture, above a row of three icon-only switch tiles, two of them lit" width="300"></td>
+</tr>
+</table>
+
+Not video, on purpose. The card asks Home Assistant's camera proxy for a still at the card's
+own size and replaces it about once a second - and **only while the card is on screen**. Put it
+on its own page of the swipe card and it costs nothing at all while another page is showing or
+the screensaver is up; swipe to it, or let an automation turn the page, and the first picture
+is there in a fraction of a second. That is what this hardware can afford: no decoder, no
+stream held open, and Home Assistant scales the still, so a 4 MP doorbell sends about 150 kB a
+picture rather than 1.5 MB. It works with every camera Home Assistant has, whatever it speaks
+upstream. The next picture is requested when the last one has arrived, so a slow network slows
+the pictures down instead of piling requests up. `interval: 0.5` is livelier; a camera that
+only matters as a glance can take `5`.
+
+If the card stays on "No picture", ask Home Assistant for the still yourself: open
+`http://<your-ha>:8123/api/camera_proxy/camera.doorbell` in a browser where you are logged in.
+When Home Assistant cannot produce a still for a camera, the card cannot show one, and the
+native app's log (`adb logcat -s flutter`) names the reason, for example `HTTP 500`.
+
+In a browser a tap opens Home Assistant's own live view of the camera. In the native app the
+card is the same still, lazily loaded the same way.
+
+**A doorbell.** With the native app each panel is a device with a **Screensaver** switch and
+a **Page** number, so the doorbell can wake the panel, turn to the camera page, ring, and go
+back by itself (pages count from 0; here the camera is the third page):
+
+```yaml
+alias: Doorbell on the hallway panel
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.doorbell_button
+    to: "on"
+actions:
+  - action: switch.turn_off            # wake it, backlight included
+    target:
+      entity_id: switch.nspanel_hallway_screensaver
+  - action: number.set_value           # turn to the camera page
+    target:
+      entity_id: number.nspanel_hallway_page
+    data:
+      value: 2
+  - action: notify.send_message        # and ring
+    target:
+      entity_id: notify.nspanel_hallway_announce
+    data:
+      message: '{"sound": "doorbell", "volume": 80}'
+  - delay: "00:01:00"
+  - action: number.set_value           # back to the first page
+    target:
+      entity_id: number.nspanel_hallway_page
+    data:
+      value: 0
+mode: restart
+```
+
+| Option | Default | |
+| --- | --- | --- |
+| `interval` | `1` | seconds between pictures, 0.2 at the least |
+| `fit` | `cover` | `contain` shows the whole picture with black around it |
+| `show_name` | `true` | the name over the picture |
+| `more_info` | `true` | tap opens Home Assistant's live view (browser only) |
 
 ### Alarm
 
