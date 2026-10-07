@@ -74,6 +74,10 @@
     <div class="cap">Lights</div>
   </div>
   <div>
+    <div class="panel" id="p-hlight"><div class="stack" id="s-hlight"></div></div>
+    <div class="cap">Lights · fill_direction: horizontal</div>
+  </div>
+  <div>
     <div class="panel" id="p-cover"><div class="stack" id="s-cover"></div></div>
     <div class="cap">Covers</div>
   </div>
@@ -297,6 +301,23 @@ card('nspanel-cover-card', {
   entity: 'cover.bedroom_blackout', title: 'Bedroom blackout',
   height: 184, show_presets: false,
 }, document.getElementById('s-cover'));
+
+/* the same two lights with the fill running sideways; they dim on a horizontal
+   drag, so swiping past them is the gap's job */
+card('nspanel-light-card', {
+  entity: 'light.dining_lights', title: 'Dining table', height: 260,
+  fill_direction: 'horizontal',
+  presets: [
+    { name: 'Low', brightness_pct: 15 },
+    { name: 'Dinner', brightness_pct: 45, color_temp_kelvin: 2400 },
+    { name: 'Full', brightness_pct: 100 },
+  ],
+}, document.getElementById('s-hlight'));
+
+card('nspanel-light-card', {
+  entity: 'light.lounge_lamp', title: 'Lounge lamp',
+  height: 184, show_presets: false, fill_direction: 'horizontal',
+}, document.getElementById('s-hlight'));
 
 /* third panel: the same light card, with the long-press sheet opened over it */
 const sheetCard = card('nspanel-light-card', {

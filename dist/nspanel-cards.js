@@ -43,9 +43,12 @@
  *
  * Horizontal drags are deliberately released back to the page on the first
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
+ * A light card with fill_direction: horizontal swaps the two: it adjusts on a
+ * sideways drag and releases the vertical one, so a page has to be swiped from
+ * somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.11.0';
+const NSPANEL_VERSION = '0.12.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -208,6 +211,22 @@ const BASE_CSS = `
 .card.dragging .fill { transition: none; }
 .fill.from-top {
   transform: translate3d(0, calc(var(--ns-fill, 0) * -100%), 0);
+}
+/* fill_direction: horizontal (light card). The same block, sliding in from the
+   left, with the level line on its right edge and the strong end of the tint
+   at that edge, as the vertical fill has it at its top. The card takes the
+   horizontal drag, so the browser may only pan vertically over it. */
+.card.horizontal { touch-action: pan-y; }
+.card.horizontal .fill {
+  background: linear-gradient(270deg,
+    var(--ns-fill-strong, rgba(255,183,74,.62)) 0%,
+    var(--ns-fill-weak, rgba(255,183,74,.34)) 100%);
+  transform: translate3d(calc((var(--ns-fill, 0) - 1) * 100%), 0, 0);
+}
+.card.horizontal .fill::after {
+  left: auto; right: 0; top: 0; bottom: 0;
+  width: 3px;
+  height: auto;
 }
 
 .content {
@@ -635,10 +654,11 @@ class NsBaseCard extends HTMLElement {
       step: 5,
       long_press_ms: 500,
       drag_travel: 0,          // px of travel for the full range; 0 = card height
+                               // (card width when the fill runs horizontally)
       live: false,             // send updates mid-drag (off = quieter, snappier)
       echo_ms: 1500,
       haptics: true,
-      swipe_safe: true,        // release horizontal drags back to the page
+      swipe_safe: true,        // release drags across the fill back to the page
       show_presets: true,
       long_press: 'sheet',
     }, this.constructor.defaultOptions, config);
@@ -773,31 +793,35 @@ class NsBaseCard extends HTMLElement {
   _onMove(e) {
     const p = this._p;
     if (!p || e.pointerId !== p.id || p.consumed) return;
-    const dx = e.clientX - p.x;
-    const dy = e.clientY - p.y;
+    const horizontal = this._horizontal();
+    // `along` is the drag in the direction the fill grows, `across` the other one.
+    const along = horizontal ? e.clientX - p.x : p.y - e.clientY;
+    const across = horizontal ? e.clientY - p.y : e.clientX - p.x;
 
     if (!p.axis) {
-      const adx = Math.abs(dx);
-      const ady = Math.abs(dy);
-      if (adx < 8 && ady < 8) return;
-      // Axis lock. A horizontal-first gesture is somebody swiping between pages
-      // in a swipe card, so we let go of it entirely rather than fighting for it.
-      if (this._config.swipe_safe && adx >= ady) {
-        p.axis = 'x';
+      const aal = Math.abs(along);
+      const aac = Math.abs(across);
+      if (aal < 8 && aac < 8) return;
+      // Axis lock. A gesture that starts across the fill is somebody swiping
+      // between pages in a swipe card, so we let go of it entirely rather than
+      // fighting for it. Which way that is follows fill_direction.
+      if (this._config.swipe_safe && aac >= aal) {
+        p.axis = 'pass';
         this._cancelPress();
         return;
       }
-      p.axis = 'y';
+      p.axis = 'drag';
       this._cancelPress();
       this._dragging = true;
       this._card.classList.add('dragging');
       try { this._surface.setPointerCapture(p.id); } catch (err) { /* ignore */ }
       this._haptic('selection');
     }
-    if (p.axis !== 'y') return;
+    if (p.axis !== 'drag') return;
 
-    const travel = this._config.drag_travel || this._card.clientHeight || 200;
-    const next = clamp(p.startValue - dy / travel, 0, 1);
+    const travel = this._config.drag_travel
+      || (horizontal ? this._card.clientWidth : this._card.clientHeight) || 200;
+    const next = clamp(p.startValue + along / travel, 0, 1);
     this._local = next;
     this._scheduleRender();
 
@@ -814,7 +838,7 @@ class NsBaseCard extends HTMLElement {
 
     if (p.consumed) { this._reset(); return; }
 
-    if (p.axis === 'y') {
+    if (p.axis === 'drag') {
       this._localUntil = Date.now() + this._config.echo_ms;
       this._commit(this._local, false);
       this._haptic('light');
@@ -826,6 +850,10 @@ class NsBaseCard extends HTMLElement {
   }
 
   _onCancel() { this._cancelPress(); this._reset(); }
+
+  /* Only the light card has fill_direction; on every other card the key is
+     absent and this is false. */
+  _horizontal() { return this._config.fill_direction === 'horizontal'; }
 
   _cancelPress() {
     if (this._pressTimer) { clearTimeout(this._pressTimer); this._pressTimer = null; }
@@ -852,7 +880,7 @@ class NsPanelLightCard extends NsBaseCard {
   static get cardType() { return 'nspanel-light-card'; }
   static get domain() { return 'light'; }
   static get accent() { return '#ffb74a'; }
-  static get defaultOptions() { return { follow_color: true }; }
+  static get defaultOptions() { return { follow_color: true, fill_direction: 'vertical' }; }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -921,7 +949,8 @@ class NsPanelLightCard extends NsBaseCard {
 
     this.shadowRoot.innerHTML = `
       <style>${BASE_CSS}</style>
-      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+      <div class="card${this._horizontal() ? ' horizontal' : ''}"
+        style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
         --ns-fill-strong:${tintStops(this._accent()).strong};
         --ns-fill-weak:${tintStops(this._accent()).weak}">
         <div class="fillwrap"><div class="fill"></div></div>
@@ -3859,13 +3888,14 @@ const EDITOR_LABELS = {
   live: 'Update while dragging',
   echo_ms: 'Ignore state echo (ms)',
   drag_travel: 'Drag travel (px, 0 = card height)',
-  swipe_safe: 'Let sideways drags change page',
+  swipe_safe: 'Let drags across the fill change page',
   long_press: 'Long press',
   long_press_ms: 'Long press (ms)',
   step: 'Step for the +/- buttons',
   haptics: 'Haptics',
   more_info: 'Tap opens more-info',
   follow_color: 'Use the light\'s own colour',
+  fill_direction: 'Fill direction',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -4186,6 +4216,13 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
 const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
+  {
+    name: 'fill_direction',
+    selector: { select: { mode: 'dropdown', options: [
+      { value: 'vertical', label: 'Vertical (drag up / down)' },
+      { value: 'horizontal', label: 'Horizontal (drag left / right)' },
+    ] } },
+  },
 ]);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([

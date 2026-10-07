@@ -75,6 +75,11 @@ It starts with installing these cards.
 | **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. |
 | **Drag sideways** | Released back to the page, so a swipe card still changes page. |
 
+A light card with `fill_direction: horizontal` turns the drags around: it fills from the left,
+adjusts on a sideways drag, and releases the vertical one instead. A swipe that starts on that
+card dims the light rather than changing page, so swipe from another card or the gap between
+them.
+
 <img src="docs/images/sheet.png" alt="The long-press control: a full-screen absolute slider at 68%, big plus and minus buttons, preset buttons and a turn-off button" width="300">
 
 Gestures apply to the control cards. The information cards are read-only: a tap opens HA's
@@ -110,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.11.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -177,6 +182,7 @@ does not argue — and `follow_color: false` turns it off while leaving the defa
 | Option | Default | |
 | --- | --- | --- |
 | `follow_color` | `true` | use the bulb's colour for the fill, the level line and the sheet |
+| `fill_direction` | `vertical` | `horizontal` fills the card from the left and dims on a sideways drag; the long-press sheet stays vertical |
 
 A preset takes any of `brightness_pct`, `color_temp_kelvin`, `rgb_color`, `effect`, or `scene`
 (to fire a scene instead). `brightness_pct: 0` turns the light off.
@@ -805,8 +811,8 @@ every minute; the panel can take it, but it is one more thing running.
 | `show_presets` | `true` | |
 | `live` | `false` | send updates mid-drag, throttled to 400 ms |
 | `echo_ms` | `1500` | ignore incoming state for this long after a change |
-| `drag_travel` | card height | px of travel for the full range |
-| `swipe_safe` | `true` | give horizontal drags back to the page |
+| `drag_travel` | card height | px of travel for the full range (card width with `fill_direction: horizontal`) |
+| `swipe_safe` | `true` | give drags across the fill back to the page (horizontal ones, or vertical ones with `fill_direction: horizontal`) |
 | `long_press` | `sheet` | or `none` |
 | `long_press_ms` | `500` | |
 | `step` | `5` | the ± buttons in the full-screen control |
