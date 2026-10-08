@@ -48,7 +48,7 @@
  * somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.12.3';
+const NSPANEL_VERSION = '0.12.4';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -294,7 +294,12 @@ const BASE_CSS = `
 /* A horizontal fill sweeps through the text from the side, so the name sits
    beside the icon instead of under it, and the row is centred in the height
    the presets leave over. */
-.card.horizontal .row { flex: 1; align-items: center; }
+.card.horizontal .row { flex: 1; min-height: 0; align-items: center; }
+/* min-height: 0 lets the row be smaller than its plates. On a low card (height
+   80 leaves 44px inside the padding for a 56px plate) the row then stays put
+   and the plates overflow it evenly up and down, so they sit on the card's
+   centre line instead of hanging off the top padding. A card too low for the
+   presets as well leaves them out (see _build). */
 .hlabel { min-width: 0; }
 /* Plates in the card's own colour, sized to their content, under the icon +
    name and under the value: the fill runs straight through this text, and with
@@ -1026,7 +1031,11 @@ class NsPanelLightCard extends NsBaseCard {
     this._elBadge = this.shadowRoot.querySelector('.badge');
     this._elPresets = this.shadowRoot.querySelector('.presets');
 
-    if (cfg.show_presets && cfg.presets.length) {
+    // A horizontal card puts the row and the chips one above the other; below
+    // this height there is no room for both, and the chips would push the name
+    // off the card's centre or out of it. The name wins.
+    const chipsFit = !horizontal || cfg.height >= 160;
+    if (cfg.show_presets && cfg.presets.length && chipsFit) {
       this._elPresets.hidden = false;
       cfg.presets.slice(0, 4).forEach((p) => {
         const b = document.createElement('button');
