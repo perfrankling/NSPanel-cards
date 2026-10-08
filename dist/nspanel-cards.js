@@ -48,7 +48,7 @@
  * somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.12.0';
+const NSPANEL_VERSION = '0.12.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -228,6 +228,11 @@ const BASE_CSS = `
   width: 3px;
   height: auto;
 }
+/* fill_style: solid (light card). The accent as it was given, fully opaque.
+   The tint above is translucent over the dark card, which shifts a chosen
+   colour - a yellow comes out olive - so this is for someone who picked the
+   colour and wants exactly it, readability of the text on top being theirs. */
+.card.solid .fill { background: var(--ns-accent); }
 
 .content {
   position: relative;
@@ -285,6 +290,13 @@ const BASE_CSS = `
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* A horizontal fill sweeps through the text from the side, so the name sits
+   beside the icon instead of under it, and the row is centred in the height
+   the presets leave over. */
+.card.horizontal .row { flex: 1; align-items: center; }
+.card.horizontal .value { padding-top: 0; }
+.hlabel { flex: 1; min-width: 0; }
 
 .presets {
   display: flex;
@@ -880,7 +892,9 @@ class NsPanelLightCard extends NsBaseCard {
   static get cardType() { return 'nspanel-light-card'; }
   static get domain() { return 'light'; }
   static get accent() { return '#ffb74a'; }
-  static get defaultOptions() { return { follow_color: true, fill_direction: 'vertical' }; }
+  static get defaultOptions() {
+    return { follow_color: true, fill_direction: 'vertical', fill_style: 'tint' };
+  }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -946,16 +960,20 @@ class NsPanelLightCard extends NsBaseCard {
     if (this._built || !this._config) return;
     this._built = true;
     const cfg = this._config;
-
-    this.shadowRoot.innerHTML = `
-      <style>${BASE_CSS}</style>
-      <div class="card${this._horizontal() ? ' horizontal' : ''}"
-        style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
-        --ns-fill-strong:${tintStops(this._accent()).strong};
-        --ns-fill-weak:${tintStops(this._accent()).weak}">
-        <div class="fillwrap"><div class="fill"></div></div>
-        <div class="badge" hidden>Offline</div>
-        <div class="content">
+    const horizontal = this._horizontal();
+    const classes = 'card' + (horizontal ? ' horizontal' : '')
+      + (cfg.fill_style === 'solid' ? ' solid' : '');
+    // Same elements either way, so everything below finds them by class.
+    const content = horizontal ? `
+          <div class="row">
+            <div class="icon"><ha-icon></ha-icon></div>
+            <div class="hlabel">
+              <div class="name"></div>
+              <div class="sub"></div>
+            </div>
+            <div class="value">0<small>%</small></div>
+          </div>
+          <div class="presets" hidden></div>` : `
           <div class="row">
             <div class="icon"><ha-icon></ha-icon></div>
             <div class="value">0<small>%</small></div>
@@ -964,7 +982,17 @@ class NsPanelLightCard extends NsBaseCard {
             <div class="name"></div>
             <div class="sub"></div>
             <div class="presets" hidden></div>
-          </div>
+          </div>`;
+
+    this.shadowRoot.innerHTML = `
+      <style>${BASE_CSS}</style>
+      <div class="${classes}"
+        style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+        --ns-fill-strong:${tintStops(this._accent()).strong};
+        --ns-fill-weak:${tintStops(this._accent()).weak}">
+        <div class="fillwrap"><div class="fill"></div></div>
+        <div class="badge" hidden>Offline</div>
+        <div class="content">${content}
         </div>
       </div>
     `;
@@ -3896,6 +3924,7 @@ const EDITOR_LABELS = {
   more_info: 'Tap opens more-info',
   follow_color: 'Use the light\'s own colour',
   fill_direction: 'Fill direction',
+  fill_style: 'Fill style',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -4221,6 +4250,13 @@ const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
     selector: { select: { mode: 'dropdown', options: [
       { value: 'vertical', label: 'Vertical (drag up / down)' },
       { value: 'horizontal', label: 'Horizontal (drag left / right)' },
+    ] } },
+  },
+  {
+    name: 'fill_style',
+    selector: { select: { mode: 'dropdown', options: [
+      { value: 'tint', label: 'Tint (translucent, text stays readable)' },
+      { value: 'solid', label: 'Solid (exactly the accent colour)' },
     ] } },
   },
 ]);
