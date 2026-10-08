@@ -48,7 +48,7 @@
  * somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.12.2';
+const NSPANEL_VERSION = '0.12.3';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -296,9 +296,10 @@ const BASE_CSS = `
    the presets leave over. */
 .card.horizontal .row { flex: 1; align-items: center; }
 .hlabel { min-width: 0; }
-/* Black plates, sized to their content, under the icon + name and under the
-   value: the fill runs straight through this text, and with a solid fill in a
-   light colour white text on it is unreadable. */
+/* Plates in the card's own colour, sized to their content, under the icon +
+   name and under the value: the fill runs straight through this text, and with
+   a solid fill in a light colour white text on it is unreadable. Over the empty
+   part of the card they match it and cannot be seen. */
 .hplate {
   display: flex;
   align-items: center;
@@ -306,13 +307,13 @@ const BASE_CSS = `
   min-width: 0;
   padding: 8px 16px 8px 8px;
   border-radius: 20px;
-  background: #000;
+  background: var(--ns-surface);
 }
 .card.horizontal .value {
   flex: none;
   padding: 8px 12px;
   border-radius: 16px;
-  background: #000;
+  background: var(--ns-surface);
 }
 .card.horizontal .value:empty { display: none; }
 
