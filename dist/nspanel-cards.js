@@ -48,7 +48,7 @@
  * somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.12.1';
+const NSPANEL_VERSION = '0.12.2';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -295,8 +295,26 @@ const BASE_CSS = `
    beside the icon instead of under it, and the row is centred in the height
    the presets leave over. */
 .card.horizontal .row { flex: 1; align-items: center; }
-.card.horizontal .value { padding-top: 0; }
-.hlabel { flex: 1; min-width: 0; }
+.hlabel { min-width: 0; }
+/* Black plates, sized to their content, under the icon + name and under the
+   value: the fill runs straight through this text, and with a solid fill in a
+   light colour white text on it is unreadable. */
+.hplate {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 16px 8px 8px;
+  border-radius: 20px;
+  background: #000;
+}
+.card.horizontal .value {
+  flex: none;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: #000;
+}
+.card.horizontal .value:empty { display: none; }
 
 .presets {
   display: flex;
@@ -966,10 +984,12 @@ class NsPanelLightCard extends NsBaseCard {
     // Same elements either way, so everything below finds them by class.
     const content = horizontal ? `
           <div class="row">
-            <div class="icon"><ha-icon></ha-icon></div>
-            <div class="hlabel">
-              <div class="name"></div>
-              <div class="sub"></div>
+            <div class="hplate">
+              <div class="icon"><ha-icon></ha-icon></div>
+              <div class="hlabel">
+                <div class="name"></div>
+                <div class="sub"></div>
+              </div>
             </div>
             <div class="value">0<small>%</small></div>
           </div>

@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.1`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.2`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -183,7 +183,7 @@ does not argue — and `follow_color: false` turns it off while leaving the defa
 | --- | --- | --- |
 | `accent` | amber `#ffb74a` | hex colour for the fill, the level line and the sheet; when set it wins over the bulb's colour |
 | `follow_color` | `true` | use the bulb's colour for the fill, the level line and the sheet (only when `accent` is not set) |
-| `fill_direction` | `vertical` | `horizontal` fills the card from the left, dims on a sideways drag and puts the name and state beside the icon, centred in height; the long-press sheet stays vertical |
+| `fill_direction` | `vertical` | `horizontal` fills the card from the left, dims on a sideways drag and puts the name and state beside the icon, centred in height, with black plates under the icon + text and under the percentage; the long-press sheet stays vertical |
 | `fill_style` | `tint` | `tint` is the colour translucent over the dark card, so the text stays readable; `solid` is the colour exactly as given, fully opaque |
 
 `fill_style: tint` lays the colour over the card at 62–34 % opacity, which shifts it: a yellow
