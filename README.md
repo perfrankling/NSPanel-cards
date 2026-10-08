@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.14.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.15.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -284,12 +284,53 @@ presets:
 
 The card fill is **volume**, so the drag gesture that dims a light sets the volume here, and
 the long-press sheet gives you an absolute slider with the same transport buttons. Tap is
-play/pause; set `more_info: true` if you would rather it opened the dialog.
+play/pause unless you give it an action of its own (below); `more_info: true` makes it open
+the dialog instead, and wins over both.
 
-Presets on this card are **favourites**, not levels. Each takes a `source` (calls
-`select_source`), a `media_content_id` with optional `media_content_type` (calls `play_media`),
-a `volume_pct`, or a combination. There are none by default — the transport row is what most
-panels want, and showing both rows needs about 300px.
+Presets on this card are **favourites**, not levels. Each one is an action stated the way a
+[button](#buttons) states it, a `volume_pct`, or both. There are none by default — the
+transport row is what most panels want, and showing both rows needs about 300px.
+
+#### Actions: favourites and tap
+
+A favourite takes the button card's keys. `entity` alone runs what its domain implies —
+`script.turn_on`, `scene.turn_on`, `automation.trigger`, `button.press`, and
+`homeassistant.toggle` for anything else — and `service:` with optional `data:` states the call
+outright, with or without an entity. The entity goes in as `entity_id` unless `data` names one.
+`volume_pct` still sets this player's volume, and with an action as well the volume goes
+first:
+
+```yaml
+presets:
+  - name: Morning radio
+    entity: script.morning_radio
+  - name: Jazz
+    service: media_player.play_media
+    data:
+      entity_id: media_player.kitchen
+      media_content_id: https://jazz24.example/stream.mp3
+      media_content_type: music
+  - name: Quiet
+    volume_pct: 15
+  - name: News, low
+    entity: script.news
+    volume_pct: 20
+```
+
+The older shorthands still work: `source` calls `select_source` on this player, and
+`media_content_id` with optional `media_content_type` (default `music`) calls `play_media` on it.
+
+A tap on the card takes the same three keys with a `tap_` in front. Nothing is filled in for
+you: `tap_service` without `tap_entity` sends exactly `tap_data`, so name the player there if
+the service wants one.
+
+```yaml
+tap_entity: script.kitchen_music_toggle
+# or
+tap_service: media_player.media_stop
+tap_data:
+  entity_id: media_player.kitchen
+```
 
 Buttons grey themselves out when the player does not advertise the feature, and the whole card
 degrades quietly: no `VOLUME_SET` and the fill still tracks your finger, it just does not send
@@ -304,8 +345,11 @@ makes the browser decode it again, and on a media card a render happens on every
 | --- | --- | --- |
 | `show_art` | `true` | album art, else the domain icon |
 | `show_transport` | `true` | previous / play-pause / next |
-| `more_info` | `false` | `true` makes tap open the dialog instead of play/pause |
-| `presets` | none | favourites: `source`, `media_content_id`, `volume_pct` |
+| `more_info` | `false` | `true` makes tap open the dialog instead of play/pause or `tap_*` |
+| `tap_entity` | — | tap runs this entity, as a button would (instead of play/pause) |
+| `tap_service` | — | tap calls this service (`domain.service`) |
+| `tap_data` | — | data for `tap_service` |
+| `presets` | none | favourites, up to 4: `name`, `entity`, `service`, `data`, `volume_pct`; the shorthands `source`, `media_content_id`, `media_content_type` |
 | `accent` | violet `#a78bfa` | hex colour for the fill, the level line and the sheet |
 | `fill_direction` | `vertical` | `horizontal` fills the card from the left, sets the volume on a sideways drag and puts the title and artist beside the art, centred in height above the buttons, on plates in the card's background colour; button rows that do not fit the height are left out (transport needs `height: 160`, both rows 228) |
 | `fill_style` | `tint` | as on the light card: `solid` is the colour exactly as given, fully opaque |

@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.14.0';
+const NSPANEL_VERSION = '0.15.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2001,6 +2001,20 @@ const BUTTON_SERVICE = {
   vacuum: ['vacuum', 'start'],
 };
 
+/* An action the way a button states it: `service` (domain.service) with
+   optional `data`, else the service the entity's domain implies, else
+   homeassistant.toggle. The entity goes in as entity_id unless data names one.
+   The media card's favourites and tap use the same keys, so they read the same. */
+function fireAction(hass, item) {
+  const parts = item.service ? item.service.split('.') : null;
+  const byDomain = item.entity ? BUTTON_SERVICE[item.entity.split('.')[0]] : null;
+  const domain = parts ? parts[0] : (byDomain ? byDomain[0] : 'homeassistant');
+  const service = parts ? parts[1] : (byDomain ? byDomain[1] : 'toggle');
+  const data = Object.assign({}, item.data || {});
+  if (item.entity && !data.entity_id) data.entity_id = item.entity;
+  if (hass) hass.callService(domain, service, data);
+}
+
 const BUTTON_ICONS = {
   script: 'mdi:script-text-outline',
   scene: 'mdi:palette-outline',
@@ -2103,15 +2117,7 @@ class NsPanelButtonCard extends NsInfoCard {
     return BUTTON_ICONS[domain] || 'mdi:gesture-tap-button';
   }
 
-  _fire(item) {
-    const parts = item.service ? item.service.split('.') : null;
-    const byDomain = item.entity ? BUTTON_SERVICE[item.entity.split('.')[0]] : null;
-    const domain = parts ? parts[0] : (byDomain ? byDomain[0] : 'homeassistant');
-    const service = parts ? parts[1] : (byDomain ? byDomain[1] : 'toggle');
-    const data = Object.assign({}, item.data || {});
-    if (item.entity && !data.entity_id) data.entity_id = item.entity;
-    if (this._hass) this._hass.callService(domain, service, data);
-  }
+  _fire(item) { fireAction(this._hass, item); }
 
   _press(b) {
     if (this._config.haptics) haptic(this, 'light');
@@ -3224,6 +3230,7 @@ class NsPanelMediaCard extends NsBaseCard {
       show_art: true, show_transport: true, more_info: false,
       fill_direction: 'vertical', fill_style: 'tint',
       volume_zoom: 0, volume_zoom_below: 25,
+      tap_entity: null, tap_service: null, tap_data: null,
     };
   }
 
@@ -3279,26 +3286,38 @@ class NsPanelMediaCard extends NsBaseCard {
     this._call('media_player', 'volume_set', { volume_level: Math.round(v * 100) / 100 });
   }
 
+  /* Tap: more-info if asked for, else the tap_* action if there is one, else
+     play/pause. tap_service without tap_entity sends exactly tap_data - the
+     card does not add its own player, as a button would not. */
   _onTap() {
-    if (this._config.more_info) { moreInfo(this, this._config.entity); return; }
+    const cfg = this._config;
+    if (cfg.more_info) { moreInfo(this, cfg.entity); return; }
+    if (cfg.tap_entity || cfg.tap_service) {
+      fireAction(this._hass, { entity: cfg.tap_entity, service: cfg.tap_service, data: cfg.tap_data });
+      return;
+    }
     this._call('media_player', 'media_play_pause');
   }
 
+  /* A favourite: volume_pct first, then a button-style action (entity /
+     service / data), then the older shorthands, which still work - source
+     selects a source on this player, media_content_id plays it here. */
   _applyPreset(p) {
     this._haptic('light');
-    if (p.source) this._call('media_player', 'select_source', { source: p.source });
-    if (p.media_content_id) {
-      this._call('media_player', 'play_media', {
-        media_content_id: p.media_content_id,
-        media_content_type: p.media_content_type || 'music',
-      });
-    }
     if (typeof p.volume_pct === 'number') {
       const v = clamp(p.volume_pct / 100, 0, 1);
       this._call('media_player', 'volume_set', { volume_level: v });
       this._local = v;
       this._localUntil = Date.now() + this._config.echo_ms;
       this._scheduleRender();
+    }
+    if (p.entity || p.service) fireAction(this._hass, p);
+    if (p.source) this._call('media_player', 'select_source', { source: p.source });
+    if (p.media_content_id) {
+      this._call('media_player', 'play_media', {
+        media_content_id: p.media_content_id,
+        media_content_type: p.media_content_type || 'music',
+      });
     }
   }
 
@@ -3409,6 +3428,9 @@ class NsPanelMediaCard extends NsBaseCard {
           this._haptic('light');
           b.run();
         });
+        // keep button touches out of the card's gesture engine, or the release
+        // also counts as a tap on the card and runs play/pause (or tap_*)
+        el.addEventListener('pointerdown', (e) => e.stopPropagation());
         this._elTransport.appendChild(el);
         return { def: b, el, icon: el.querySelector('ha-icon') };
       });
@@ -3421,6 +3443,7 @@ class NsPanelMediaCard extends NsBaseCard {
         b.className = 'chip';
         b.textContent = p.name;
         b.addEventListener('click', (e) => { e.stopPropagation(); this._applyPreset(p); });
+        b.addEventListener('pointerdown', (e) => e.stopPropagation());
         this._elFavourites.appendChild(b);
       });
     }
@@ -4025,6 +4048,9 @@ const EDITOR_LABELS = {
   fill_style: 'Fill style',
   volume_zoom: 'Quiet scale: card spans 0 to (%, 0 = off)',
   volume_zoom_below: 'Quiet scale below (%)',
+  tap_entity: 'Tap runs this entity (instead of play/pause)',
+  tap_service: 'Tap calls this service (instead of play/pause)',
+  tap_data: 'Tap service data',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -4080,10 +4106,13 @@ const PRESET_FIELDS = {
     preset_mode: { selector: { text: {} } },
   }),
   media: Object.assign({}, NAME_FIELD, {
+    entity: { selector: { entity: {} } },
+    service: { selector: { text: {} } },
+    data: { selector: { object: {} } },
+    volume_pct: { selector: { number: { min: 0, max: 100, step: 1, mode: 'box' } } },
     source: { selector: { text: {} } },
     media_content_id: { selector: { text: {} } },
     media_content_type: { selector: { text: {} } },
-    volume_pct: { selector: { number: { min: 0, max: 100, step: 1, mode: 'box' } } },
   }),
 };
 const ENTITY_FIELD = { entity: { required: true, selector: { entity: {} } } };
@@ -4386,6 +4415,9 @@ const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
       { name: 'volume_zoom_below', selector: { number: { min: 1, max: 99, step: 1, mode: 'box' } } },
     ],
   },
+  { name: 'tap_entity', selector: { entity: {} } },
+  { name: 'tap_service', selector: { text: {} } },
+  { name: 'tap_data', selector: { object: {} } },
 ], FILL_SCHEMA);
 
 /* The button card's entity row is the one-button shorthand; several buttons
