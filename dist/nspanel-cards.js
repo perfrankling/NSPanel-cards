@@ -43,12 +43,12 @@
  *
  * Horizontal drags are deliberately released back to the page on the first
  * move, so a swipe card wrapping these cards keeps working. See _onMove.
- * A light card with fill_direction: horizontal swaps the two: it adjusts on a
- * sideways drag and releases the vertical one, so a page has to be swiped from
- * somewhere other than that card.
+ * A light or media card with fill_direction: horizontal swaps the two: it
+ * adjusts on a sideways drag and releases the vertical one, so a page has to be
+ * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.12.4';
+const NSPANEL_VERSION = '0.13.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -887,8 +887,8 @@ class NsBaseCard extends HTMLElement {
 
   _onCancel() { this._cancelPress(); this._reset(); }
 
-  /* Only the light card has fill_direction; on every other card the key is
-     absent and this is false. */
+  /* Only the light and media cards have fill_direction; on every other card the
+     key is absent and this is false. */
   _horizontal() { return this._config.fill_direction === 'horizontal'; }
 
   _cancelPress() {
@@ -3189,6 +3189,9 @@ const MEDIA_CSS = `
    these are opaque. The second selector matches BASE_CSS's specificity for
    the off state and wins on order. */
 .chip, .card:not(.on) .chip { background: var(--ns-surface-2); }
+/* Beside the text the art matches the icon box, so a horizontal media card
+   lines up with a horizontal light card next to it. Still a fixed box. */
+.card.horizontal .art { width: 52px; height: 52px; border-radius: 12px; }
 `;
 
 class NsPanelMediaCard extends NsBaseCard {
@@ -3196,7 +3199,10 @@ class NsPanelMediaCard extends NsBaseCard {
   static get domain() { return 'media_player'; }
   static get accent() { return '#a78bfa'; }
   static get defaultOptions() {
-    return { show_art: true, show_transport: true, more_info: false };
+    return {
+      show_art: true, show_transport: true, more_info: false,
+      fill_direction: 'vertical', fill_style: 'tint',
+    };
   }
 
   static getStubConfig(hass) {
@@ -3292,13 +3298,26 @@ class NsPanelMediaCard extends NsBaseCard {
     this._built = true;
     const cfg = this._config;
     const tint = tintStops(this._accent());
-    this.shadowRoot.innerHTML = `
-      <style>${BASE_CSS}${MEDIA_CSS}</style>
-      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
-        --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
-        <div class="fillwrap"><div class="fill"></div></div>
-        <div class="badge" hidden>Offline</div>
-        <div class="content">
+    const horizontal = this._horizontal();
+    const classes = 'card' + (horizontal ? ' horizontal' : '')
+      + (cfg.fill_style === 'solid' ? ' solid' : '');
+    // Same elements either way, so everything below finds them by class. The
+    // horizontal one is the light card's layout: art/icon and text on one
+    // plate, the volume on another, centred above the button rows.
+    const content = horizontal ? `
+          <div class="row">
+            <div class="hplate">
+              <div class="art" hidden><img alt=""></div>
+              <div class="icon"><ha-icon></ha-icon></div>
+              <div class="hlabel">
+                <div class="name"></div>
+                <div class="sub"></div>
+              </div>
+            </div>
+            <div class="value"></div>
+          </div>
+          <div class="presets transport" hidden></div>
+          <div class="presets favourites" hidden></div>` : `
           <div class="row">
             <div class="art" hidden><img alt=""></div>
             <div class="icon"><ha-icon></ha-icon></div>
@@ -3309,7 +3328,14 @@ class NsPanelMediaCard extends NsBaseCard {
             <div class="sub"></div>
             <div class="presets transport" hidden></div>
             <div class="presets favourites" hidden></div>
-          </div>
+          </div>`;
+    this.shadowRoot.innerHTML = `
+      <style>${BASE_CSS}${MEDIA_CSS}</style>
+      <div class="${classes}" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+        --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
+        <div class="fillwrap"><div class="fill"></div></div>
+        <div class="badge" hidden>Offline</div>
+        <div class="content">${content}
         </div>
       </div>
     `;
@@ -3325,7 +3351,13 @@ class NsPanelMediaCard extends NsBaseCard {
     this._elTransport = this.shadowRoot.querySelector('.transport');
     this._elFavourites = this.shadowRoot.querySelector('.favourites');
 
-    if (cfg.show_transport) {
+    // A horizontal card stacks the row and the button rows; each button row
+    // (56px + 12px gap) is only shown while the row keeps 56px of the height
+    // inside the padding. Transport is laid out first, favourites if still room.
+    let room = horizontal ? cfg.height - 36 - 56 : Infinity;
+    const fits = () => { if (room < 68) return false; room -= 68; return true; };
+
+    if (cfg.show_transport && fits()) {
       this._elTransport.hidden = false;
       this._buttons = [
         { key: 'prev', icon: 'mdi:skip-previous', bit: MP_PREV,
@@ -3349,7 +3381,7 @@ class NsPanelMediaCard extends NsBaseCard {
       });
     }
 
-    if (cfg.show_presets && cfg.presets.length) {
+    if (cfg.show_presets && cfg.presets.length && fits()) {
       this._elFavourites.hidden = false;
       cfg.presets.slice(0, 4).forEach((p) => {
         const b = document.createElement('button');
@@ -4272,9 +4304,8 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
 ]);
 
 /* The light card is the only one whose accent can come from the entity. */
-const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
-  { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
-  { name: 'follow_color', selector: { boolean: {} } },
+/* fill_direction and fill_style: the light and media cards take both. */
+const FILL_SCHEMA = [
   {
     name: 'fill_direction',
     selector: { select: { mode: 'dropdown', options: [
@@ -4289,7 +4320,12 @@ const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
       { value: 'solid', label: 'Solid (exactly the accent colour)' },
     ] } },
   },
-]);
+];
+
+const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
+  { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
+  { name: 'follow_color', selector: { boolean: {} } },
+], FILL_SCHEMA);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.cover, 'name', 'position') },
@@ -4306,7 +4342,7 @@ const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
       { name: 'more_info', selector: { boolean: {} } },
     ],
   },
-]);
+], FILL_SCHEMA);
 
 /* The button card's entity row is the one-button shorthand; several buttons
    go in the list, which then wins over the entity row. */

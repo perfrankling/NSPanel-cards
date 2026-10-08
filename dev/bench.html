@@ -78,6 +78,10 @@
     <div class="cap">Lights · fill_direction: horizontal</div>
   </div>
   <div>
+    <div class="panel" id="p-hmedia"><div class="stack" id="s-hmedia"></div></div>
+    <div class="cap">Media · fill_direction: horizontal</div>
+  </div>
+  <div>
     <div class="panel" id="p-cover"><div class="stack" id="s-cover"></div></div>
     <div class="cap">Covers</div>
   </div>
@@ -361,6 +365,23 @@ card('nspanel-media-card', {
     { name: 'Quiet', volume_pct: 15 },
   ],
 }, document.getElementById('s-media'));
+
+/* the same player with the fill running sideways: both button rows at 300,
+   transport only at 160 */
+card('nspanel-media-card', {
+  entity: 'media_player.kitchen', title: 'Kitchen', height: 300,
+  fill_direction: 'horizontal',
+  presets: [
+    { name: 'Radio 4', source: 'BBC Radio 4' },
+    { name: 'Jazz', source: 'Jazz24' },
+    { name: 'Quiet', volume_pct: 15 },
+  ],
+}, document.getElementById('s-hmedia'));
+
+card('nspanel-media-card', {
+  entity: 'media_player.kitchen', title: 'Kitchen', height: 160,
+  fill_direction: 'horizontal', fill_style: 'solid', accent: '#ffd400',
+}, document.getElementById('s-hmedia'));
 
 card('nspanel-sensors-card', {
   title: 'Outside', height: 144,

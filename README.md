@@ -75,7 +75,7 @@ It starts with installing these cards.
 | **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. |
 | **Drag sideways** | Released back to the page, so a swipe card still changes page. |
 
-A light card with `fill_direction: horizontal` turns the drags around: it fills from the left,
+A light or media card with `fill_direction: horizontal` turns the drags around: it fills from the left,
 adjusts on a sideways drag, and releases the vertical one instead. A swipe that starts on that
 card dims the light rather than changing page, so swipe from another card or the gap between
 them.
@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.12.4`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.13.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -306,6 +306,12 @@ makes the browser decode it again, and on a media card a render happens on every
 | `show_transport` | `true` | previous / play-pause / next |
 | `more_info` | `false` | `true` makes tap open the dialog instead of play/pause |
 | `presets` | none | favourites: `source`, `media_content_id`, `volume_pct` |
+| `accent` | violet `#a78bfa` | hex colour for the fill, the level line and the sheet |
+| `fill_direction` | `vertical` | `horizontal` fills the card from the left, sets the volume on a sideways drag and puts the title and artist beside the art, centred in height above the buttons, on plates in the card's background colour; button rows that do not fit the height are left out (transport needs `height: 160`, both rows 228) |
+| `fill_style` | `tint` | as on the light card: `solid` is the colour exactly as given, fully opaque |
+
+With `fill_direction: horizontal` the art shrinks to the 52px of the icon box, so it lines up
+with a horizontal light card beside it.
 
 ### Buttons
 
