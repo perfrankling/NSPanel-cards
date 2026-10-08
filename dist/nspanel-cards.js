@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.13.0';
+const NSPANEL_VERSION = '0.14.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -847,6 +847,9 @@ class NsBaseCard extends HTMLElement {
         return;
       }
       p.axis = 'drag';
+      // The scale the fill is drawn on holds for the whole drag; it is only
+      // worked out again on release (see _span).
+      this._spanLock = this._fillSpan();
       this._cancelPress();
       this._dragging = true;
       this._card.classList.add('dragging');
@@ -857,7 +860,8 @@ class NsBaseCard extends HTMLElement {
 
     const travel = this._config.drag_travel
       || (horizontal ? this._card.clientWidth : this._card.clientHeight) || 200;
-    const next = clamp(p.startValue + along / travel, 0, 1);
+    const span = this._span();
+    const next = clamp(p.startValue + (along / travel) * span, 0, span);
     this._local = next;
     this._scheduleRender();
 
@@ -891,6 +895,13 @@ class NsBaseCard extends HTMLElement {
      key is absent and this is false. */
   _horizontal() { return this._config.fill_direction === 'horizontal'; }
 
+  /* How much of the value the whole card stands for: 1 everywhere except the
+     media card's volume_zoom, where a quiet player is drawn on 0-30 instead of
+     0-100. A drag pins it in _spanLock, so the scale cannot change under the
+     finger when the value crosses the threshold - it changes on release. */
+  _span() { return this._spanLock || this._fillSpan(); }
+  _fillSpan() { return 1; }
+
   _cancelPress() {
     if (this._pressTimer) { clearTimeout(this._pressTimer); this._pressTimer = null; }
   }
@@ -900,6 +911,7 @@ class NsBaseCard extends HTMLElement {
       try { this._surface.releasePointerCapture(this._p.id); } catch (err) { /* ignore */ }
     }
     this._p = null;
+    this._spanLock = null;
     this._dragging = false;
     if (this._card) this._card.classList.remove('dragging');
     this._scheduleRender();
@@ -3192,6 +3204,15 @@ const MEDIA_CSS = `
 /* Beside the text the art matches the icon box, so a horizontal media card
    lines up with a horizontal light card next to it. Still a fixed box. */
 .card.horizontal .art { width: 52px; height: 52px; border-radius: 12px; }
+/* the zoomed scale, under the volume, so a full card at 18% explains itself */
+.value .range {
+  display: block;
+  margin: 4px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-align: right;
+}
 `;
 
 class NsPanelMediaCard extends NsBaseCard {
@@ -3202,6 +3223,7 @@ class NsPanelMediaCard extends NsBaseCard {
     return {
       show_art: true, show_transport: true, more_info: false,
       fill_direction: 'vertical', fill_style: 'tint',
+      volume_zoom: 0, volume_zoom_below: 25,
     };
   }
 
@@ -3237,6 +3259,17 @@ class NsPanelMediaCard extends NsBaseCard {
     const s = this._stateObj;
     const v = s && s.attributes ? s.attributes.volume_level : null;
     return typeof v === 'number' ? clamp(v, 0, 1) : 0;
+  }
+
+  /* volume_zoom: below volume_zoom_below percent the card is a 0-volume_zoom
+     slider, so the quiet end - where most listening happens - gets the whole
+     card instead of a sliver of it. 0 turns it off. The sheet stays 0-100. */
+  _fillSpan() {
+    const cfg = this._config;
+    const zoom = Number(cfg.volume_zoom) || 0;
+    if (zoom <= 0 || zoom >= 100) return 1;
+    const pct = this._displayValue() * 100;
+    return pct < Number(cfg.volume_zoom_below) && pct <= zoom ? zoom / 100 : 1;
   }
 
   _commit(v) {
@@ -3452,7 +3485,8 @@ class NsPanelMediaCard extends NsBaseCard {
     this._card.classList.toggle('on', !idle && !broken);
     this._elBadge.hidden = !broken;
 
-    this._card.style.setProperty('--ns-fill', String(broken ? 0 : v));
+    const span = this._span();
+    this._card.style.setProperty('--ns-fill', String(broken ? 0 : clamp(v / span, 0, 1)));
     this._card.style.setProperty('--ns-fill-opacity', broken || idle ? '0' : '1');
 
     // Only touch src when the URL changes: same src reassigned is a re-decode,
@@ -3470,11 +3504,13 @@ class NsPanelMediaCard extends NsBaseCard {
     }
 
     const lines = this._lines();
-    const stamp = `${lines.top}|${lines.sub}|${pct}|${idle}|${broken}`;
+    const stamp = `${lines.top}|${lines.sub}|${pct}|${idle}|${broken}|${span}`;
     if (this._shown !== stamp) {
       this._shown = stamp;
+      const range = span < 1
+        ? `<small class="range">0\u2013${Math.round(span * 100)}</small>` : '';
       this._elValue.innerHTML = broken || idle || typeof a.volume_level !== 'number'
-        ? '' : `${pct}<small>%</small>`;
+        ? '' : `${pct}<small>%</small>${range}`;
       this._elName.textContent = lines.top;
       this._elSub.textContent = lines.sub;
     }
@@ -3987,6 +4023,8 @@ const EDITOR_LABELS = {
   follow_color: 'Use the light\'s own colour',
   fill_direction: 'Fill direction',
   fill_style: 'Fill style',
+  volume_zoom: 'Quiet scale: card spans 0 to (%, 0 = off)',
+  volume_zoom_below: 'Quiet scale below (%)',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -4340,6 +4378,12 @@ const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
       { name: 'show_art', selector: { boolean: {} } },
       { name: 'show_transport', selector: { boolean: {} } },
       { name: 'more_info', selector: { boolean: {} } },
+    ],
+  },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'volume_zoom', selector: { number: { min: 0, max: 99, step: 1, mode: 'box' } } },
+      { name: 'volume_zoom_below', selector: { number: { min: 1, max: 99, step: 1, mode: 'box' } } },
     ],
   },
 ], FILL_SCHEMA);

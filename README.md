@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.13.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.14.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -309,6 +309,25 @@ makes the browser decode it again, and on a media card a render happens on every
 | `accent` | violet `#a78bfa` | hex colour for the fill, the level line and the sheet |
 | `fill_direction` | `vertical` | `horizontal` fills the card from the left, sets the volume on a sideways drag and puts the title and artist beside the art, centred in height above the buttons, on plates in the card's background colour; button rows that do not fit the height are left out (transport needs `height: 160`, both rows 228) |
 | `fill_style` | `tint` | as on the light card: `solid` is the colour exactly as given, fully opaque |
+| `volume_zoom` | `0` (off) | below `volume_zoom_below` the card is a 0–`volume_zoom` slider instead of 0–100 |
+| `volume_zoom_below` | `25` | the volume, in percent, under which `volume_zoom` applies |
+
+#### A finer scale for quiet listening
+
+Most listening happens in the bottom quarter of the range, where a 0–100 card leaves you a few
+pixels per step. With `volume_zoom: 30`, a player under 25% is drawn on 0–30: the whole card is
+30%, a small `0–30` under the number says so, and the percentage stays the real volume. At 25%
+and up it is the usual 0–100.
+
+The scale is fixed for as long as your finger is down and worked out again when you let go, so
+it never jumps under the finger: drag to the end of 0–30 and you get 30%; the next drag is on
+0–100. A change from elsewhere that crosses the threshold does move the fill, from nearly full
+to a quarter or back. The long-press sheet is always 0–100.
+
+```yaml
+volume_zoom: 30
+volume_zoom_below: 25
+```
 
 With `fill_direction: horizontal` the art shrinks to the 52px of the icon box, so it lines up
 with a horizontal light card beside it.
