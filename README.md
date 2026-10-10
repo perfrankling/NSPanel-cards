@@ -498,6 +498,14 @@ An icon-only button sizes its icon to the button, 60% of its shorter side, so a 
 gets a big icon. Some custom icon sets draw their shape with a margin inside the icon's frame
 and still come out small; `icon_scale: 1.4` (or whatever looks right) makes up for it.
 
+**A custom SVG icon that will not grow** is almost always missing its `viewBox`. An
+`<svg width="24" height="24">` without one cannot scale: asked for 60px it draws its 24px
+inside a 60px frame, top left, and `icon_scale` cannot help. Start the file with
+`<svg viewBox="0 0 24 24" ...>` instead. `icons/` holds the blinds icons this way - one path
+each, the shape an MDI icon has - and `icons/custom-icons.js` holds the same paths for pages
+that are not HA: load it beside `kiosk/icons.js` (the bench does), or put your own
+`window.NS_CUSTOM_ICONS = { 'custom:name': 'M...' }` in `kiosk/config.js`.
+
 **Coloured by an attribute.** `color_attribute` paints the whole button in the colour an
 attribute names, read from the button's entity or from `color_entity`. Any CSS colour works -
 a name like `Purple` in any case, or a hex code - and the icon and name turn dark on a light

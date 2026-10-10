@@ -56,6 +56,9 @@ dev/serve.py               no-cache static server for both (plain http.server le
 dev/shots.ps1              drives headless Chrome over the bench to regenerate the README
                            screenshots
 docs/images/               those screenshots; referenced from the README
+icons/                     the owner's custom: icons - .svg (viewBox + one path, for HA's
+                           custom-icons folder) and custom-icons.js, the same paths as
+                           window.NS_CUSTOM_ICONS for the bench, kiosk/ and the app
 kiosk/                     the standalone panel page - same cards, a websocket to HA, and
                            none of the HA frontend. index.html + app.js + icons.js, plus
                            config.js which belongs to the user and is never rewritten

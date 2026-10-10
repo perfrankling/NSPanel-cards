@@ -82,6 +82,10 @@
     <div class="cap">Media · fill_direction: horizontal</div>
   </div>
   <div>
+    <div class="panel" id="p-custom"><div class="stack" id="s-custom"></div></div>
+    <div class="cap">Buttons · custom: icons, colour from an attribute</div>
+  </div>
+  <div>
     <div class="panel" id="p-cover"><div class="stack" id="s-cover"></div></div>
     <div class="cap">Covers</div>
   </div>
@@ -134,6 +138,7 @@
 <!-- the shipped bundle, loaded exactly as HA loads it -->
 <script src="../dist/nspanel-cards.js"></script>
 <script src="../kiosk/icons.js"></script>
+<script src="../icons/custom-icons.js"></script>
 
 <script>
 /* <ha-icon> and its path data come from kiosk/icons.js - the same file the
@@ -365,6 +370,28 @@ card('nspanel-media-card', {
     { name: 'Quiet', volume_pct: 15 },
   ],
 }, document.getElementById('s-media'));
+
+/* custom: icons (icons/custom-icons.js) on icon-only buttons, painted from the
+   attributes of a template cover */
+{
+  const cover = { entity_id: 'cover.pertemp', state: 'open', attributes: {
+    friendly_name: 'Persienn', upstatus: 'Purple', downstatus: 'Black', favstatus: 'Black' } };
+  const h = Object.assign({}, hass, { states: Object.assign({}, hass.states, { 'cover.pertemp': cover }) });
+  const btn = (icon, service, attr) => ({ entity: 'cover.pertemp', icon, service, color_attribute: attr });
+  for (const height of [160, 300]) {
+    const el = document.createElement('nspanel-button-card');
+    el.setConfig({
+      height, columns: 3, show_name: false, colors: { Purple: '#a78bfa' },
+      buttons: [
+        btn('custom:persienn öppen', 'cover.open_cover', 'upstatus'),
+        btn('custom:persienn halvöppen', 'cover.stop_cover', 'favstatus'),
+        btn('custom:persienn stängd', 'cover.close_cover', 'downstatus'),
+      ],
+    });
+    el.hass = h;
+    document.getElementById('s-custom').appendChild(el);
+  }
+}
 
 /* the same player with the fill running sideways: both button rows at 300,
    transport only at 160 */

@@ -139,15 +139,29 @@ function pathFor(name) {
   return window.MDI_PATHS[name] || runtime[name] || null;
 }
 
+/* Any other prefix - custom:, hass:... - is a set the CDN does not have. Those
+   come from window.NS_CUSTOM_ICONS (icons/custom-icons.js, or a page's own
+   table), keyed by the full name, and are never fetched. */
+function customPathFor(full) {
+  return (window.NS_CUSTOM_ICONS || {})[full] || null;
+}
+
 class HaIcon extends HTMLElement {
   static get observedAttributes() { return ['icon']; }
   connectedCallback() { this._paint(); }
   attributeChangedCallback() { this._paint(); }
 
   _paint() {
-    const name = (this.getAttribute('icon') || '').replace('mdi:', '');
+    const full = this.getAttribute('icon') || '';
+    const name = full.replace('mdi:', '');
     if (!name || name === this._shown) return;
     this._shown = name;
+    if (name.indexOf(':') !== -1) {
+      const c = customPathFor(full);
+      if (c) this._draw(c);
+      else { this.innerHTML = ''; console.warn('nspanel: no path for ' + full); }
+      return;
+    }
     const d = pathFor(name);
     if (d) { this._draw(d); return; }
     fetchPath(name).then((got) => {
