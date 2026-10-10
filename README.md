@@ -49,7 +49,7 @@ It starts with installing these cards.
 
 | Card | What it does |
 | --- | --- |
-| `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–3 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
+| `custom:nspanel-button-card` | Scenes, scripts, automations. One big button, or up to six in a 1–4 column grid. Tells you the tap landed, and can ask twice before doing something drastic. |
 | `custom:nspanel-camera-card` | A camera on the wall: a still at the card's own size, refreshed about once a second, and only while its page is on screen. Made for a doorbell page. |
 | `custom:nspanel-swipe-card` | Pages side by side, swiped, with dots. The panel's own pager, so nothing else from HACS is needed; the native app reads it as its list of pages. |
 | `custom:nspanel-switch-card` | Switches, input booleans, fans: the same grid, but each tile reflects its entity — lit while on — and a tap turns it the other way, echoed at once. |
@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.16.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.16.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -421,7 +421,7 @@ icon: mdi:weather-night
 height: 144
 ```
 
-`columns` puts 1, 2 or 3 across, never more than there are buttons: the buttons in a row
+`columns` puts 1 to 4 across, never more than there are buttons: the buttons in a row
 always share its full width, so two buttons under `columns: 3` are two half-width buttons — the
 lower card in the picture is `columns: 3`, its first button icon-only and lit by a boolean. Six buttons is the cap; more than that on a 480px
 panel is a list of things you cannot read, let alone hit.
@@ -457,7 +457,7 @@ the scene did not do what you expected.
 | Option | Default | |
 | --- | --- | --- |
 | `buttons` | — | up to 6; `entity` alone is the one-button shorthand |
-| `columns` | `2` | 1–3, capped at the number of buttons; a row is always shared by the buttons in it |
+| `columns` | `2` | 1–4, capped at the number of buttons; a row is always shared by the buttons in it. Four across suits icon-only rows (`show_name: false`) |
 | `confirm` | `false` | ask for a second tap; also settable per button |
 | `confirm_text` | `Tap again` | shown while it waits |
 | `feedback_ms` | `1200` | how long the tick holds |

@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.16.0';
+const NSPANEL_VERSION = '0.16.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2048,6 +2048,11 @@ const BUTTON_CSS = `
 .btn.nolabel .bl { display: none; }
 .btn.nolabel ha-icon { --mdc-icon-size: 48px; }
 .pad[data-cols="3"] .btn.nolabel ha-icon { --mdc-icon-size: 40px; }
+/* four across: narrower still */
+.pad[data-cols="4"] .btn { padding: 6px; gap: 6px; }
+.pad[data-cols="4"] .btn ha-icon { --mdc-icon-size: 28px; }
+.pad[data-cols="4"] .btn .bl { font-size: 13px; line-height: 17px; }
+.pad[data-cols="4"] .btn.nolabel ha-icon { --mdc-icon-size: 36px; }
 .btn[disabled] { opacity: .45; }
 `;
 
@@ -2094,11 +2099,12 @@ class NsPanelButtonCard extends NsInfoCard {
     };
   }
 
-  /* 1, 2 or 3 across, and never more than there are buttons: a half-width
+  /* 1 to 4 across, and never more than there are buttons: a half-width
      button with empty space beside it just looks like a mistake, and the
-     compact styling belongs to three across. */
+     compact styling belongs to three and four across. Four is for icon rows -
+     open / stop / close / one more - at about 105px a button on a Pro 86. */
   get _columns() {
-    const cols = clamp(Math.round(this._config.columns) || 2, 1, 3);
+    const cols = clamp(Math.round(this._config.columns) || 2, 1, 4);
     return Math.max(1, Math.min(cols, this._items.length));
   }
 
@@ -4522,7 +4528,7 @@ const BUTTON_SCHEMA = [
   },
   {
     name: '', type: 'grid', schema: [
-      { name: 'columns', selector: { number: { min: 1, max: 3, step: 1, mode: 'box' } } },
+      { name: 'columns', selector: { number: { min: 1, max: 4, step: 1, mode: 'box' } } },
       { name: 'feedback_ms', selector: { number: { min: 0, max: 5000, step: 100, mode: 'box' } } },
       { name: 'confirm', selector: { boolean: {} } },
       { name: 'haptics', selector: { boolean: {} } },
