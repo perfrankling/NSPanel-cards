@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.18.2';
+const NSPANEL_VERSION = '0.19.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2199,6 +2199,13 @@ const BUTTON_CSS = `
 .btn[disabled] { opacity: .45; }
 `;
 
+/* The control card whose sheet a button's long_press: sheet borrows, by domain. */
+const SHEET_CARDS = {
+  light: 'nspanel-light-card',
+  cover: 'nspanel-cover-card',
+  media_player: 'nspanel-media-card',
+};
+
 /* What to call for a bare entity, by domain. Anything not listed toggles,
    which is the right answer for lights, switches, fans and input_booleans. */
 const BUTTON_SERVICE = {
@@ -2270,7 +2277,7 @@ class NsPanelButtonCard extends NsInfoCard {
     return {
       buttons: [], columns: 2, haptics: true, confirm: false,
       confirm_text: 'Tap again', feedback_ms: 1200, more_info: true, show_name: true,
-      icon_scale: 1, colors: null,
+      icon_scale: 1, colors: null, long_press: null, long_press_ms: 500,
     };
   }
 
@@ -2449,20 +2456,90 @@ class NsPanelButtonCard extends NsInfoCard {
         armed: false,
         fired: false,
       };
-      el.addEventListener('click', () => this._press(b));
-      // A long-press opens more-info on the entity behind the button, which is
-      // where you go to find out why the scene did not do what you expected.
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (item.entity && this._config.more_info) moreInfo(this, item.entity);
+      el.addEventListener('click', () => {
+        // the release after a long-press is not also a press
+        if (b.longFired) { b.longFired = false; return; }
+        this._press(b);
       });
+      this._bindLongPress(b);
       pad.appendChild(el);
       return b;
     });
   }
 
+  /* A long-press, timed here rather than left to the browser's contextmenu:
+     a mouse never sends one for a held button, and the companion app's WebView
+     often swallows it. Movement past 8px is a scroll or a swipe, not a press. */
+  _bindLongPress(b) {
+    const el = b.el;
+    let timer = null;
+    let sx = 0;
+    let sy = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== undefined && e.button !== 0) return;
+      b.longFired = false;
+      sx = e.clientX;
+      sy = e.clientY;
+      cancel();
+      if (this._longPressFor(b.item) === 'none') return;
+      timer = setTimeout(() => {
+        timer = null;
+        b.longFired = true;
+        if (this._config.haptics) haptic(this, 'medium');
+        this._longPress(b.item);
+      }, this._config.long_press_ms);
+    });
+    el.addEventListener('pointermove', (e) => {
+      if (timer && (Math.abs(e.clientX - sx) > 8 || Math.abs(e.clientY - sy) > 8)) cancel();
+    });
+    el.addEventListener('pointerup', cancel);
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('pointerleave', cancel);
+    // the browser's own long-press menu has nothing to offer here
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  /* long_press, per button or for the card: 'sheet' (our full-screen control
+     for the button's entity), 'more-info' (HA's dialog) or 'none'. Unset, it
+     is what more_info always meant: HA's dialog, or nothing with more_info off. */
+  _longPressFor(item) {
+    if (!item.entity) return 'none';
+    const lp = item.long_press || this._config.long_press;
+    if (lp) return lp;
+    return this._config.more_info ? 'more-info' : 'none';
+  }
+
+  _longPress(item) {
+    const mode = this._longPressFor(item);
+    if (mode === 'sheet') {
+      const tag = SHEET_CARDS[item.entity.split('.')[0]];
+      if (tag) { this._sheetCard(item.entity, tag)._openSheet(); return; }
+    }
+    if (mode !== 'none') moreInfo(this, item.entity);
+  }
+
+  /* The sheet belongs to a control card, so a button borrows one: a light,
+     cover or media card for its entity that is never put on the page. It owns
+     the sheet while it is open, and _render below hands it every new hass, so
+     the sheet stays as live as it is from the card itself. */
+  _sheetCard(entity, tag) {
+    this._sheetCards = this._sheetCards || {};
+    let c = this._sheetCards[entity];
+    if (!c) {
+      c = document.createElement(tag);
+      c.setConfig({ entity, accent: this._config.accent || undefined });
+      this._sheetCards[entity] = c;
+    }
+    if (this._hass) c.hass = this._hass;
+    return c;
+  }
+
   _render() {
     if (!this._btns) return;
+    Object.keys(this._sheetCards || {}).forEach((id) => {
+      if (this._hass) this._sheetCards[id].hass = this._hass;
+    });
     this._btns.forEach((b) => {
       const s = b.item.entity ? this._state(b.item.entity) : null;
       // Not isBroken(): that counts `unknown` as broken, which is the normal
@@ -4719,6 +4796,12 @@ const MEDIA_SCHEMA = SHARED_SCHEMA.concat([
 
 /* The button card's entity row is the one-button shorthand; several buttons
    go in the list, which then wins over the entity row. */
+const BUTTON_LONG_PRESS = { select: { mode: 'dropdown', options: [
+  { value: 'sheet', label: 'Full-screen control (light, cover, media)' },
+  { value: 'more-info', label: 'Home Assistant dialog' },
+  { value: 'none', label: 'Nothing' },
+] } };
+
 const BUTTON_SCHEMA = [
   { name: 'title', selector: { text: {} } },
   {
@@ -4743,6 +4826,7 @@ const BUTTON_SCHEMA = [
       icon_scale: { selector: { number: { min: 0.5, max: 3, step: 0.1, mode: 'box' } } },
       color_attribute: { selector: { text: {} } },
       color_entity: { selector: { entity: {} } },
+      long_press: { selector: BUTTON_LONG_PRESS },
     }, 'name', 'entity'),
   },
   {
@@ -4757,6 +4841,12 @@ const BUTTON_SCHEMA = [
     ],
   },
   { name: 'confirm_text', selector: { text: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'long_press', selector: BUTTON_LONG_PRESS },
+      { name: 'long_press_ms', selector: { number: { min: 200, max: 2000, step: 50, mode: 'box' } } },
+    ],
+  },
   { name: 'colors', selector: { object: {} } },
 ];
 
