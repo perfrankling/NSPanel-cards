@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.16.1';
+const NSPANEL_VERSION = '0.17.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2025,7 +2025,11 @@ const BUTTON_CSS = `
   transition: transform .1s ease-out;
 }
 .btn:active { transform: scale(.96); }
-.btn ha-icon { --mdc-icon-size: 40px; color: var(--ns-muted); flex: none; }
+.btn ha-icon {
+  --mdc-icon-size: calc(40px * var(--ns-icon-scale, 1));
+  color: var(--ns-muted);
+  flex: none;
+}
 .btn .bl {
   font-size: 18px;
   font-weight: 600;
@@ -2042,17 +2046,25 @@ const BUTTON_CSS = `
 .btn.hot ha-icon, .btn.hot .bl { color: var(--ns-accent); }
 .btn.ask .bl { color: var(--ns-accent); }
 /* three across is narrow; shrink to stay readable rather than clipped */
-.pad[data-cols="3"] .btn ha-icon { --mdc-icon-size: 32px; }
+.pad[data-cols="3"] .btn ha-icon { --mdc-icon-size: calc(32px * var(--ns-icon-scale, 1)); }
 .pad[data-cols="3"] .btn .bl { font-size: 15px; line-height: 19px; }
-/* icon only: the icon takes the room the name had */
-.btn.nolabel .bl { display: none; }
-.btn.nolabel ha-icon { --mdc-icon-size: 48px; }
-.pad[data-cols="3"] .btn.nolabel ha-icon { --mdc-icon-size: 40px; }
 /* four across: narrower still */
 .pad[data-cols="4"] .btn { padding: 6px; gap: 6px; }
-.pad[data-cols="4"] .btn ha-icon { --mdc-icon-size: 28px; }
+.pad[data-cols="4"] .btn ha-icon { --mdc-icon-size: calc(28px * var(--ns-icon-scale, 1)); }
 .pad[data-cols="4"] .btn .bl { font-size: 13px; line-height: 17px; }
-.pad[data-cols="4"] .btn.nolabel ha-icon { --mdc-icon-size: 36px; }
+/* icon only: the icon is sized to the button - 60% of its shorter side - so a
+   tall button gets a big icon at any column count. cqmin is the button's own
+   box; icon_scale (--ns-icon-scale) enlarges it further for icon sets drawn
+   with a margin inside their frame. */
+.btn.nolabel .bl { display: none; }
+.btn.nolabel { container-type: size; }
+.btn.nolabel ha-icon,
+.pad[data-cols] .btn.nolabel ha-icon { --mdc-icon-size: calc(60cqmin * var(--ns-icon-scale, 1)); }
+/* painted from an attribute (color_attribute): the colour is the whole
+   button, and the icon and name pick black or white to stay readable on it.
+   After .hot on purpose - the attribute is the state, and it wins. */
+.btn.painted { background: var(--ns-btn-bg); }
+.btn.painted ha-icon, .btn.painted .bl { color: var(--ns-btn-fg); }
 .btn[disabled] { opacity: .45; }
 `;
 
@@ -2066,6 +2078,37 @@ const BUTTON_SERVICE = {
   input_button: ['input_button', 'press'],
   vacuum: ['vacuum', 'start'],
 };
+
+/* Any CSS colour - a name like 'Purple', hex, rgb() - as [r, g, b], or null if
+   the browser does not know it. A 2D context normalises whatever it is given,
+   so there is no table of colour names to keep here. Cached: a button asks on
+   every render. */
+const _colourCache = new Map();
+let _colourCtx = null;
+function parseColour(c) {
+  if (_colourCache.has(c)) return _colourCache.get(c);
+  if (!_colourCtx) _colourCtx = document.createElement('canvas').getContext('2d');
+  let rgb = null;
+  if (_colourCtx) {
+    // Two sentinels: an unknown colour leaves fillStyle as it was, so it reads
+    // back as the sentinel - and the two sentinels differ.
+    const probe = (sentinel) => {
+      _colourCtx.fillStyle = sentinel;
+      _colourCtx.fillStyle = c;
+      return _colourCtx.fillStyle;
+    };
+    const a = probe('#010203');
+    const b = probe('#040506');
+    if (a === b) {
+      const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(a);
+      const n = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(a);
+      if (m) rgb = [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+      else if (n) rgb = [Number(n[1]), Number(n[2]), Number(n[3])];
+    }
+  }
+  _colourCache.set(c, rgb);
+  return rgb;
+}
 
 /* An action the way a button states it: `service` (domain.service) with
    optional `data`, else the service the entity's domain implies, else
@@ -2096,6 +2139,7 @@ class NsPanelButtonCard extends NsInfoCard {
     return {
       buttons: [], columns: 2, haptics: true, confirm: false,
       confirm_text: 'Tap again', feedback_ms: 1200, more_info: true, show_name: true,
+      icon_scale: 1, colors: null,
     };
   }
 
@@ -2143,6 +2187,7 @@ class NsPanelButtonCard extends NsInfoCard {
     this._items.forEach((i) => {
       if (i.entity) ids.push(i.entity);
       if (i.state_entity) ids.push(i.state_entity);
+      if (i.color_entity) ids.push(i.color_entity);
     });
     return ids;
   }
@@ -2157,6 +2202,29 @@ class NsPanelButtonCard extends NsInfoCard {
 
   _showName(item) {
     return item.show_name === undefined ? !!this._config.show_name : !!item.show_name;
+  }
+
+  /* color_attribute: the button's colour, read from an attribute of
+     color_entity (default: the button's own entity). Black, none or empty
+     mean "not painted" - the normal button - since a black button on this
+     card reads as a hole. `colors` on the card maps names to your palette
+     (CSS purple is a dark #800080); a name it does not map is used as is.
+     Returns { bg, fg } or null. */
+  _paint(item) {
+    if (!item.color_attribute) return null;
+    const id = item.color_entity || item.entity;
+    const s = id ? this._state(id) : null;
+    const raw = s && s.attributes ? s.attributes[item.color_attribute] : null;
+    const name = raw === null || raw === undefined ? '' : String(raw).trim();
+    const low = name.toLowerCase();
+    if (!name || low === 'black' || low === 'none') return null;
+    const map = this._config.colors || {};
+    const key = Object.keys(map).find((k) => k.toLowerCase() === low);
+    const bg = key ? String(map[key]) : name;
+    const rgb = parseColour(bg);
+    if (!rgb) return null;
+    const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+    return { bg, fg: lum > 150 ? '#14161a' : '#ffffff' };
   }
 
   _teardown() {
@@ -2235,6 +2303,8 @@ class NsPanelButtonCard extends NsInfoCard {
     this._btns = items.map((item) => {
       const el = document.createElement('button');
       el.className = 'btn' + (this._showName(item) ? '' : ' nolabel');
+      const scale = Number(item.icon_scale !== undefined ? item.icon_scale : this._config.icon_scale);
+      if (scale && scale !== 1) el.style.setProperty('--ns-icon-scale', String(scale));
       // a colour of its own: the lit state uses it instead of the card's accent
       if (item.color) {
         el.style.setProperty('--ns-accent', String(item.color));
@@ -2270,6 +2340,17 @@ class NsPanelButtonCard extends NsInfoCard {
       const broken = b.item.entity ? (!s || s.state === 'unavailable') : false;
 
       b.el.classList.toggle('hot', b.fired || this._lit(b.item));
+      // only written when it changes: this runs on every state change
+      const paint = broken ? null : this._paint(b.item);
+      const stamp = paint ? `${paint.bg}|${paint.fg}` : '';
+      if (stamp !== b.painted) {
+        b.painted = stamp;
+        b.el.classList.toggle('painted', !!paint);
+        if (paint) {
+          b.el.style.setProperty('--ns-btn-bg', paint.bg);
+          b.el.style.setProperty('--ns-btn-fg', paint.fg);
+        }
+      }
       if (broken) b.el.setAttribute('disabled', ''); else b.el.removeAttribute('disabled');
 
       const icon = broken ? 'mdi:alert-circle-outline'
@@ -4132,6 +4213,10 @@ const EDITOR_LABELS = {
   tap_entity: 'Tap runs this entity (instead of play/pause)',
   tap_service: 'Tap calls this service (instead of play/pause)',
   tap_data: 'Tap service data',
+  icon_scale: 'Icon scale (1 = normal)',
+  color_attribute: 'Colour from this attribute',
+  color_entity: 'Attribute read from (default: the entity)',
+  colors: 'Colour names to your own colours',
   secondary: 'Second entity (shown underneath)',
   unit: 'Unit (blank = the entity\'s own)',
   decimals: 'Decimals',
@@ -4524,6 +4609,9 @@ const BUTTON_SCHEMA = [
       state_entity: { selector: { entity: {} } },
       color: { selector: { text: {} } },
       show_name: { selector: { boolean: {} } },
+      icon_scale: { selector: { number: { min: 0.5, max: 3, step: 0.1, mode: 'box' } } },
+      color_attribute: { selector: { text: {} } },
+      color_entity: { selector: { entity: {} } },
     }, 'name', 'entity'),
   },
   {
@@ -4534,9 +4622,11 @@ const BUTTON_SCHEMA = [
       { name: 'haptics', selector: { boolean: {} } },
       { name: 'more_info', selector: { boolean: {} } },
       { name: 'show_name', selector: { boolean: {} } },
+      { name: 'icon_scale', selector: { number: { min: 0.5, max: 3, step: 0.1, mode: 'box' } } },
     ],
   },
   { name: 'confirm_text', selector: { text: {} } },
+  { name: 'colors', selector: { object: {} } },
 ];
 
 /* The pages are whole cards, which no form draws: the object selector with

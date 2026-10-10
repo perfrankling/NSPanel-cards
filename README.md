@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.16.1`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.17.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -491,9 +491,43 @@ buttons:
 | Option | Default | |
 | --- | --- | --- |
 | `show_name` | `true` | `false` shows the icon only; also settable per button |
+| `icon_scale` | `1` | enlarges (or shrinks) the icons; also settable per button |
+| `colors` | — | maps colour names from `color_attribute` to your own colours |
+
+An icon-only button sizes its icon to the button, 60% of its shorter side, so a tall button
+gets a big icon. Some custom icon sets draw their shape with a margin inside the icon's frame
+and still come out small; `icon_scale: 1.4` (or whatever looks right) makes up for it.
+
+**Coloured by an attribute.** `color_attribute` paints the whole button in the colour an
+attribute names, read from the button's entity or from `color_entity`. Any CSS colour works -
+a name like `Purple` in any case, or a hex code - and the icon and name turn dark on a light
+colour. `Black`, `none` or an empty attribute leave the button as it normally looks. CSS's own
+`purple` is a dark `#800080`, so `colors` maps names to your palette; a name it does not list
+is used as it is. A painted button stays in its colour when it is lit or pressed: the attribute
+is the state.
+
+```yaml
+type: custom:nspanel-button-card
+height: 160
+columns: 3
+show_name: false
+colors:
+  Purple: '#a78bfa'
+buttons:
+  - entity: cover.pertemp
+    icon: custom:persienn öppen
+    icon_scale: 1.4
+    service: cover.open_cover
+    color_attribute: upstatus
+  - entity: cover.pertemp
+    icon: custom:persienn stängd
+    icon_scale: 1.4
+    service: cover.close_cover
+    color_attribute: downstatus
+```
 
 Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`,
-`state_entity`, `color`, `show_name`.
+`state_entity`, `color`, `show_name`, `icon_scale`, `color_attribute`, `color_entity`.
 
 ### Swipe
 
