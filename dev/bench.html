@@ -86,6 +86,10 @@
     <div class="cap">Buttons · custom: icons, colour from an attribute</div>
   </div>
   <div>
+    <div class="panel" id="p-hcover"><div class="stack" id="s-hcover"></div></div>
+    <div class="cap">Covers · fill_direction: horizontal</div>
+  </div>
+  <div>
     <div class="panel" id="p-cover"><div class="stack" id="s-cover"></div></div>
     <div class="cap">Covers</div>
   </div>
@@ -370,6 +374,21 @@ card('nspanel-media-card', {
     { name: 'Quiet', volume_pct: 15 },
   ],
 }, document.getElementById('s-media'));
+
+/* covers sideways: the blind comes in from the left, dragging right closes */
+card('nspanel-cover-card', {
+  entity: 'cover.blinds_living_room', title: 'Living room blinds', height: 260,
+  fill_direction: 'horizontal',
+  presets: [
+    { name: 'Open', position: 100 },
+    { name: 'Privacy', position: 35 },
+    { name: 'Shut', position: 0 },
+  ],
+}, document.getElementById('s-hcover'));
+card('nspanel-cover-card', {
+  entity: 'cover.blinds_living_room', title: 'Living room blinds', height: 184,
+  fill_direction: 'horizontal', fill_style: 'solid', show_presets: false,
+}, document.getElementById('s-hcover'));
 
 /* custom: icons (icons/custom-icons.js) on icon-only buttons, painted from the
    attributes of a template cover */

@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.17.0';
+const NSPANEL_VERSION = '0.18.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -227,6 +227,11 @@ const BASE_CSS = `
   left: auto; right: 0; top: 0; bottom: 0;
   width: 3px;
   height: auto;
+}
+/* the cover's blind, sideways: it comes in from the left and covers 1 - value
+   of the card, so at 62% open the left 38% is blind */
+.card.horizontal .fill.from-top {
+  transform: translate3d(calc(var(--ns-fill, 0) * -100%), 0, 0);
 }
 /* fill_style: solid (light card). The accent as it was given, fully opaque.
    The tint above is translucent over the dark card, which shifts a chosen
@@ -427,6 +432,7 @@ const SHEET_CSS = `
 .x:active { transform: scale(.94); }
 
 .body { flex: 1; display: flex; gap: 14px; min-height: 0; }
+[hidden] { display: none !important; }
 .track {
   position: relative;
   flex: 1;
@@ -447,6 +453,18 @@ const SHEET_CSS = `
 }
 .track.dragging .tfill { transition: none; }
 .tfill.from-top { transform: translate3d(0, calc(var(--ns-fill, 0) * -100%), 0); }
+/* with two tracks (a cover's position and tilt) each says which it is */
+.tlab {
+  position: absolute;
+  left: 0; right: 0; top: 14px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255,255,255,.78);
+  text-shadow: 0 1px 4px rgba(0,0,0,.55);
+  pointer-events: none;
+}
+.tlab:empty { display: none; }
 .tval {
   position: absolute;
   left: 0; right: 0; bottom: 18px;
@@ -476,6 +494,7 @@ const SHEET_CSS = `
   transition: transform .1s ease-out;
 }
 .step:active { transform: scale(.95); }
+.step ha-icon { --mdc-icon-size: 40px; }
 
 .actions { display: flex; gap: 10px; flex: none; }
 .act {
@@ -523,7 +542,12 @@ class NsSheet extends HTMLElement {
           <button class="x" aria-label="Close">&#10005;</button>
         </div>
         <div class="body">
-          <div class="track"><div class="tfill"></div><div class="tval"></div></div>
+          <div class="track main">
+            <div class="tfill"></div><div class="tlab"></div><div class="tval"></div>
+          </div>
+          <div class="track tilt" hidden>
+            <div class="tfill"></div><div class="tlab"></div><div class="tval"></div>
+          </div>
           <div class="steps">
             <button class="step up" aria-label="Increase">+</button>
             <button class="step down" aria-label="Decrease">&minus;</button>
@@ -536,28 +560,43 @@ class NsSheet extends HTMLElement {
     this._wrap = this.shadowRoot.querySelector('.wrap');
     this._title = this.shadowRoot.querySelector('.title');
     this._state = this.shadowRoot.querySelector('.state');
-    this._track = this.shadowRoot.querySelector('.track');
-    this._tfill = this.shadowRoot.querySelector('.tfill');
-    this._tval = this.shadowRoot.querySelector('.tval');
+    this._track = this.shadowRoot.querySelector('.track.main');
+    this._tfill = this._track.querySelector('.tfill');
+    this._tval = this._track.querySelector('.tval');
+    this._tlab = this._track.querySelector('.tlab');
+    this._tilt = this.shadowRoot.querySelector('.track.tilt');
+    this._tiltVal = this._tilt.querySelector('.tval');
+    this._tiltLab = this._tilt.querySelector('.tlab');
+    this._up = this.shadowRoot.querySelector('.up');
+    this._down = this.shadowRoot.querySelector('.down');
+    this._active = { main: false, tilt: false };
     this._actions = this.shadowRoot.querySelector('.actions');
 
     this.shadowRoot.querySelector('.x').addEventListener('click', () => this.close());
     this._scrim.addEventListener('click', () => this.close());
-    this.shadowRoot.querySelector('.up')
-      .addEventListener('click', () => this._step(+this._opts.step));
-    this.shadowRoot.querySelector('.down')
-      .addEventListener('click', () => this._step(-this._opts.step));
+    // The two side buttons are +/- steps unless the card hands over actions for
+    // them (stepUp / stepDown): a cover with tilt makes them tilt open / close.
+    const side = (key, sign) => () => {
+      const a = this._opts[key];
+      if (a) { haptic(this, 'light'); a.run(); } else this._step(sign * this._opts.step);
+    };
+    this._up.addEventListener('click', side('stepUp', +1));
+    this._down.addEventListener('click', side('stepDown', -1));
 
-    this._bindTrack();
+    this._bindTrack(this._track, 'main');
+    this._bindTrack(this._tilt, 'tilt');
   }
 
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
-            onTap(), muted, owner, actions:[{label, icon, primary, run}] } */
+            onTap(), muted, owner, label, actions:[{label, icon, primary, run}],
+            stepUp / stepDown: {icon, label, run} in place of the +/- steps,
+            tilt: {value 0..1, label, onInput(v), onCommit(v)} - a second track } */
   open(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
     this._owner = opts.owner || null;
     this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
     this._actionsShown = null;
+    this._sideShown = null;
     this._show(this._opts, true);
 
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
@@ -579,7 +618,7 @@ class NsSheet extends HTMLElement {
      incoming state can never pull it away mid-drag. */
   update(opts) {
     Object.assign(this._opts, opts);
-    this._show(this._opts, !this._trackActive);
+    this._show(this._opts, !this._active.main);
   }
 
   _show(opts, withValue) {
@@ -591,6 +630,23 @@ class NsSheet extends HTMLElement {
     this._state.textContent = opts.state || '';
     this.classList.toggle('muted', !!opts.muted);
     if (withValue) this.setValue(opts.value);
+
+    const tilt = opts.tilt || null;
+    this._tilt.hidden = !tilt;
+    this._tlab.textContent = tilt ? (opts.label || '') : '';
+    this._tiltLab.textContent = tilt ? (tilt.label || '') : '';
+    if (tilt && !this._active.tilt) this._setTilt(tilt.value);
+
+    const sideStamp = [opts.stepUp, opts.stepDown]
+      .map((a) => (a ? `${a.icon}|${a.label || ''}` : '')).join(';');
+    if (sideStamp !== this._sideShown) {
+      this._sideShown = sideStamp;
+      [[this._up, opts.stepUp, '+', 'Increase'], [this._down, opts.stepDown, '\u2212', 'Decrease']]
+        .forEach(([el, a, text, label]) => {
+          el.innerHTML = a ? `<ha-icon icon="${a.icon}"></ha-icon>` : text;
+          el.setAttribute('aria-label', a ? (a.label || label) : label);
+        });
+    }
 
     // Rebuilt only when what they say changes (play -> pause), not per render.
     const acts = opts.actions || [];
@@ -619,6 +675,14 @@ class NsSheet extends HTMLElement {
     this._tval.textContent = Math.round(this._value * 100) + '%';
   }
 
+  // the second track keeps its value on its own element, so it does not
+  // inherit the first one's --ns-fill
+  _setTilt(v) {
+    this._tiltValue = clamp(v, 0, 1);
+    this._tilt.style.setProperty('--ns-fill', String(this._tiltValue));
+    this._tiltVal.textContent = Math.round(this._tiltValue * 100) + '%';
+  }
+
   close() {
     this._owner = null;
     this._scrim.classList.remove('in');
@@ -635,9 +699,12 @@ class NsSheet extends HTMLElement {
     if (this._opts.onCommit) this._opts.onCommit(v);
   }
 
-  _bindTrack() {
-    const t = this._track;
+  /* which: 'main' (this._opts) or 'tilt' (this._opts.tilt). */
+  _bindTrack(t, which) {
     let active = false;
+    const o = () => (which === 'tilt' ? (this._opts.tilt || {}) : this._opts);
+    const put = (v) => (which === 'tilt' ? this._setTilt(v) : this.setValue(v));
+    const now = () => (which === 'tilt' ? this._tiltValue : this._value);
 
     // the sheet's track is absolute: touch position IS the value. It is a
     // dedicated full-height surface, so there is nothing to be precise about.
@@ -656,18 +723,18 @@ class NsSheet extends HTMLElement {
     let sy = 0;
     const set = (clientY) => {
       const v = valueAt(clientY);
-      this.setValue(v);
-      if (this._opts.onInput) this._opts.onInput(v);
+      put(v);
+      if (o().onInput) o().onInput(v);
     };
 
     t.addEventListener('pointerdown', (e) => {
       active = true;
-      this._trackActive = true;
+      this._active[which] = true;
       sx = e.clientX;
       sy = e.clientY;
       t.setPointerCapture(e.pointerId);
       t.classList.add('dragging');
-      dragging = !this._opts.onTap;
+      dragging = !o().onTap;
       if (dragging) {
         set(e.clientY);
         haptic(this, 'selection');
@@ -685,13 +752,13 @@ class NsSheet extends HTMLElement {
     const end = (cancelled) => {
       if (!active) return;
       active = false;
-      this._trackActive = false;
+      this._active[which] = false;
       t.classList.remove('dragging');
       if (dragging) {
-        if (this._opts.onCommit) this._opts.onCommit(this._value);
-      } else if (!cancelled && this._opts.onTap) {
+        if (o().onCommit) o().onCommit(now());
+      } else if (!cancelled && o().onTap) {
         haptic(this, 'light');
-        this._opts.onTap();
+        o().onTap();
       }
       dragging = false;
     };
@@ -922,7 +989,7 @@ class NsBaseCard extends HTMLElement {
     const travel = this._config.drag_travel
       || (horizontal ? this._card.clientWidth : this._card.clientHeight) || 200;
     const span = this._span();
-    const next = clamp(p.startValue + (along / travel) * span, 0, span);
+    const next = clamp(p.startValue + this._dragSign() * (along / travel) * span, 0, span);
     this._local = next;
     this._scheduleRender();
 
@@ -952,8 +1019,8 @@ class NsBaseCard extends HTMLElement {
 
   _onCancel() { this._cancelPress(); this._reset(); }
 
-  /* Only the light and media cards have fill_direction; on every other card the
-     key is absent and this is false. */
+  /* Only the light, cover and media cards have fill_direction; on every other
+     card the key is absent and this is false. */
   _horizontal() { return this._config.fill_direction === 'horizontal'; }
 
   /* How much of the value the whole card stands for: 1 everywhere except the
@@ -962,6 +1029,11 @@ class NsBaseCard extends HTMLElement {
      finger when the value crosses the threshold - it changes on release. */
   _span() { return this._spanLock || this._fillSpan(); }
   _fillSpan() { return 1; }
+
+  /* +1: a drag the way the fill grows raises the value. The cover turns this
+     round when it runs sideways - its fill is the blind, and dragging right
+     brings the blind down. */
+  _dragSign() { return 1; }
 
   _cancelPress() {
     if (this._pressTimer) { clearTimeout(this._pressTimer); this._pressTimer = null; }
@@ -1221,6 +1293,7 @@ class NsPanelCoverCard extends NsBaseCard {
   static get cardType() { return 'nspanel-cover-card'; }
   static get domain() { return 'cover'; }
   static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() { return { fill_direction: 'vertical', fill_style: 'tint' }; }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -1256,6 +1329,31 @@ class NsPanelCoverCard extends NsBaseCard {
     if (this._built || !this._config) return;
     this._built = true;
     const cfg = this._config;
+    const horizontal = this._horizontal();
+    const classes = 'card' + (horizontal ? ' horizontal' : '')
+      + (cfg.fill_style === 'solid' ? ' solid' : '');
+    // the light card's layouts, element for element
+    const content = horizontal ? `
+          <div class="row">
+            <div class="hplate">
+              <div class="icon"><ha-icon></ha-icon></div>
+              <div class="hlabel">
+                <div class="name"></div>
+                <div class="sub"></div>
+              </div>
+            </div>
+            <div class="value">0<small>%</small></div>
+          </div>
+          <div class="presets" hidden></div>` : `
+          <div class="row">
+            <div class="icon"><ha-icon></ha-icon></div>
+            <div class="value">0<small>%</small></div>
+          </div>
+          <div>
+            <div class="name"></div>
+            <div class="sub"></div>
+            <div class="presets" hidden></div>
+          </div>`;
 
     this.shadowRoot.innerHTML = `
       <style>${BASE_CSS}
@@ -1272,24 +1370,17 @@ class NsPanelCoverCard extends NsBaseCard {
             rgba(0,0,0,0) 14px);
           pointer-events: none;
         }
+        /* sideways the blind is one solid area, no slat lines */
+        .card.horizontal .slats { display: none; }
       </style>
-      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+      <div class="${classes}" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
         --ns-fill-strong:${tintStops(this._accent()).strong};
         --ns-fill-weak:${tintStops(this._accent()).weak}">
         <div class="fillwrap">
           <div class="fill from-top"><div class="slats"></div></div>
         </div>
         <div class="badge" hidden>Offline</div>
-        <div class="content">
-          <div class="row">
-            <div class="icon"><ha-icon></ha-icon></div>
-            <div class="value">0<small>%</small></div>
-          </div>
-          <div>
-            <div class="name"></div>
-            <div class="sub"></div>
-            <div class="presets" hidden></div>
-          </div>
+        <div class="content">${content}
         </div>
       </div>
     `;
@@ -1302,7 +1393,8 @@ class NsPanelCoverCard extends NsBaseCard {
     this._elBadge = this.shadowRoot.querySelector('.badge');
     this._elPresets = this.shadowRoot.querySelector('.presets');
 
-    if (cfg.show_presets && cfg.presets.length) {
+    // as on the light card: a horizontal card too low for the chips leaves them out
+    if (cfg.show_presets && cfg.presets.length && (!horizontal || cfg.height >= 160)) {
       this._elPresets.hidden = false;
       cfg.presets.slice(0, 4).forEach((p) => {
         const b = document.createElement('button');
@@ -1336,6 +1428,19 @@ class NsPanelCoverCard extends NsBaseCard {
     this._call('cover', 'toggle');
   }
 
+  _dragSign() { return this._horizontal() ? -1 : 1; }
+
+  /* Tilt has its own echo window, like _local / _localUntil for position, so a
+     released tilt track does not snap back before the cover reports in. */
+  _tiltValue() {
+    if (this._tiltLocal !== null && this._tiltLocal !== undefined && Date.now() < this._tiltUntil) {
+      return this._tiltLocal;
+    }
+    const s = this._stateObj;
+    const t = s && s.attributes ? s.attributes.current_tilt_position : null;
+    return typeof t === 'number' ? clamp(t / 100, 0, 1) : 0;
+  }
+
   _commit(v) {
     const pct = Math.round(v * 100);
     if (this._supports(4)) this._call('cover', 'set_cover_position', { position: pct });
@@ -1345,10 +1450,32 @@ class NsPanelCoverCard extends NsBaseCard {
 
   _sheetOpts() {
     const s = this._stateObj;
+    // cover supported_features: OPEN_TILT 16, CLOSE_TILT 32, SET_TILT_POSITION 128
+    const tilt = this._supports(128) ? {
+      label: 'Tilt',
+      value: this._tiltValue(),
+      onInput: (v) => {
+        this._tiltLocal = v;
+        this._tiltUntil = Date.now() + this._config.echo_ms;
+      },
+      onCommit: (v) => {
+        this._tiltLocal = v;
+        this._tiltUntil = Date.now() + this._config.echo_ms;
+        this._call('cover', 'set_cover_tilt_position', { tilt_position: Math.round(v * 100) });
+      },
+    } : null;
+    // HA's tilt buttons: open / close the tilt fully, in place of the +/- steps
+    const tiltButtons = this._supports(16) && this._supports(32);
     return {
       title: this._title(),
       state: this._stateText(s, Math.round(this._displayValue() * 100)),
       value: this._displayValue(),
+      label: 'Position',
+      tilt,
+      stepUp: tiltButtons ? { icon: 'mdi:rotate-right', label: 'Tilt open',
+        run: () => this._call('cover', 'open_cover_tilt') } : null,
+      stepDown: tiltButtons ? { icon: 'mdi:rotate-left', label: 'Tilt close',
+        run: () => this._call('cover', 'close_cover_tilt') } : null,
       fromTop: true,
       accent: this._accent(),
       step: this._config.step,
@@ -4537,7 +4664,7 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
 ]);
 
 /* The light card is the only one whose accent can come from the entity. */
-/* fill_direction and fill_style: the light and media cards take both. */
+/* fill_direction and fill_style: the light, cover and media cards take both. */
 const FILL_SCHEMA = [
   {
     name: 'fill_direction',
@@ -4562,7 +4689,7 @@ const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.cover, 'name', 'position') },
-]);
+], FILL_SCHEMA);
 
 /* The media card is a control card, minus the options that make no sense for
    one: there are no levels to preset by dragging, and no ± step worth a row. */

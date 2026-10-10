@@ -75,10 +75,10 @@ It starts with installing these cards.
 | **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. It stays live while open: a new track, play turning to pause, a change from elsewhere all show. |
 | **Drag sideways** | Released back to the page, so a swipe card still changes page. |
 
-A light or media card with `fill_direction: horizontal` turns the drags around: it fills from the left,
-adjusts on a sideways drag, and releases the vertical one instead. A swipe that starts on that
-card dims the light rather than changing page, so swipe from another card or the gap between
-them.
+A light, cover or media card with `fill_direction: horizontal` turns the drags around: it
+fills from the left, adjusts on a sideways drag, and releases the vertical one instead. A swipe
+that starts on that card adjusts it rather than changing page, so swipe from another card or
+the gap between them.
 
 <img src="docs/images/sheet.png" alt="The long-press control: a full-screen absolute slider at 68%, big plus and minus buttons, preset buttons and a turn-off button" width="300">
 
@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.17.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.18.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -222,6 +222,25 @@ The fill descends from the top, the way a blind actually does: at 62% open it
 covers the top 38% of the card.
 
 Falls back to `open_cover` / `close_cover` when the entity doesn't advertise `SET_POSITION`.
+
+The preset buttons are optional: `show_presets: false` drops the row, and `presets:` replaces
+the default Open / Half / Shut with your own (up to four, each a `name` and a `position`).
+
+**Sideways.** `fill_direction: horizontal` lays the card out like a horizontal light: the blind
+comes in from the left as one solid area, without slat lines, and **dragging right brings it
+down**, dragging left raises it. The name sits beside the icon on a plate, and presets are
+left out below `height: 160`. `fill_style: solid` paints the blind in the accent, fully opaque.
+
+**Tilt.** In the long-press sheet a cover that can set its tilt gets two tracks side by side,
+**Position** and **Tilt**, each with its own value; releasing the tilt track calls
+`set_cover_tilt_position`. A cover that can open and close its tilt gets HA's tilt buttons in
+place of the ± steps - tilt open and tilt close (`open_cover_tilt` / `close_cover_tilt`), with
+curved arrows. A cover without tilt keeps the single track and the ± steps.
+
+| Option | Default | |
+| --- | --- | --- |
+| `fill_direction` | `vertical` | `horizontal`: blind from the left, drag right to close, name beside the icon |
+| `fill_style` | `tint` | `solid` is the accent exactly as given, fully opaque |
 
 ### Climate
 
@@ -929,7 +948,7 @@ every minute; the panel can take it, but it is one more thing running.
 | `height` | `200` | card height in px; the editor's spinner stops at 900, YAML does not |
 | `accent` | amber / sky | any hex |
 | `presets` | 3 sensible ones | max 4 shown on the card |
-| `show_presets` | `true` | |
+| `show_presets` | `true` | `false` hides the row of preset buttons on the card |
 | `live` | `false` | send updates mid-drag, throttled to 400 ms |
 | `echo_ms` | `1500` | ignore incoming state for this long after a change |
 | `drag_travel` | card height | px of travel for the full range (card width with `fill_direction: horizontal`) |
