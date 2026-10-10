@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.15.0';
+const NSPANEL_VERSION = '0.16.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -459,6 +459,8 @@ const SHEET_CSS = `
   color: #ffffff;
   text-shadow: 0 2px 8px rgba(0,0,0,.55);
 }
+/* a muted player: the volume is still shown, in grey */
+:host(.muted) .tval { color: #8e939b; }
 .steps { display: flex; flex-direction: column; gap: 14px; flex: none; width: 96px; }
 .step {
   flex: 1;
@@ -550,29 +552,13 @@ class NsSheet extends HTMLElement {
   }
 
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
-            actions:[{label, icon, primary, run}] } */
+            onTap(), muted, owner, actions:[{label, icon, primary, run}] } */
   open(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
-    this.style.setProperty('--ns-accent', this._opts.accent);
-    this._title.textContent = opts.title || '';
-    this._state.textContent = opts.state || '';
+    this._owner = opts.owner || null;
     this._tfill.classList.toggle('from-top', !!this._opts.fromTop);
-    this.setValue(opts.value);
-
-    this._actions.innerHTML = '';
-    (opts.actions || []).forEach((a) => {
-      const b = document.createElement('button');
-      b.className = 'act' + (a.primary ? ' primary' : '');
-      b.innerHTML = (a.icon ? `<ha-icon icon="${a.icon}"></ha-icon>` : '') +
-        `<span>${a.label}</span>`;
-      b.addEventListener('click', () => {
-        haptic(this, 'light');
-        a.run();
-        if (a.close !== false) this.close();
-      });
-      this._actions.appendChild(b);
-    });
-    this._actions.style.display = (opts.actions && opts.actions.length) ? '' : 'none';
+    this._actionsShown = null;
+    this._show(this._opts, true);
 
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
     if (this.parentNode !== host) {
@@ -586,6 +572,47 @@ class NsSheet extends HTMLElement {
     });
   }
 
+  ownedBy(card) { return !!this._owner && this._owner === card && !!this.parentNode; }
+
+  /* The owning card's fresh options, on every render of that card while the
+     sheet is open. The value is left alone under a finger on the track, so an
+     incoming state can never pull it away mid-drag. */
+  update(opts) {
+    Object.assign(this._opts, opts);
+    this._show(this._opts, !this._trackActive);
+  }
+
+  _show(opts, withValue) {
+    if (opts.accent !== this._accentShown) {
+      this._accentShown = opts.accent;
+      this.style.setProperty('--ns-accent', opts.accent);
+    }
+    this._title.textContent = opts.title || '';
+    this._state.textContent = opts.state || '';
+    this.classList.toggle('muted', !!opts.muted);
+    if (withValue) this.setValue(opts.value);
+
+    // Rebuilt only when what they say changes (play -> pause), not per render.
+    const acts = opts.actions || [];
+    const stamp = acts.map((a) => `${a.label}|${a.icon}|${a.primary ? 1 : 0}`).join(';');
+    if (stamp === this._actionsShown) return;
+    this._actionsShown = stamp;
+    this._actions.innerHTML = '';
+    acts.forEach((a) => {
+      const b = document.createElement('button');
+      b.className = 'act' + (a.primary ? ' primary' : '');
+      b.innerHTML = (a.icon ? `<ha-icon icon="${a.icon}"></ha-icon>` : '') +
+        `<span>${a.label}</span>`;
+      b.addEventListener('click', () => {
+        haptic(this, 'light');
+        a.run();
+        if (a.close !== false) this.close();
+      });
+      this._actions.appendChild(b);
+    });
+    this._actions.style.display = acts.length ? '' : 'none';
+  }
+
   setValue(v) {
     this._value = clamp(v, 0, 1);
     this.style.setProperty('--ns-fill', String(this._value));
@@ -593,6 +620,7 @@ class NsSheet extends HTMLElement {
   }
 
   close() {
+    this._owner = null;
     this._scrim.classList.remove('in');
     this._wrap.classList.remove('in');
     const done = () => { if (this.parentNode) this.parentNode.removeChild(this); };
@@ -620,29 +648,55 @@ class NsSheet extends HTMLElement {
       return clamp(1 - (clientY - r.top) / r.height, 0, 1);
     };
 
-    t.addEventListener('pointerdown', (e) => {
-      active = true;
-      t.setPointerCapture(e.pointerId);
-      t.classList.add('dragging');
-      const v = valueAt(e.clientY);
+    // With an onTap (the media sheet: mute) a touch is not a value yet. It
+    // becomes a drag after 8px of movement, and a release short of that is the
+    // tap. Without one, the touch point is the value at once, as it always was.
+    let dragging = false;
+    let sx = 0;
+    let sy = 0;
+    const set = (clientY) => {
+      const v = valueAt(clientY);
       this.setValue(v);
       if (this._opts.onInput) this._opts.onInput(v);
-      haptic(this, 'selection');
+    };
+
+    t.addEventListener('pointerdown', (e) => {
+      active = true;
+      this._trackActive = true;
+      sx = e.clientX;
+      sy = e.clientY;
+      t.setPointerCapture(e.pointerId);
+      t.classList.add('dragging');
+      dragging = !this._opts.onTap;
+      if (dragging) {
+        set(e.clientY);
+        haptic(this, 'selection');
+      }
     });
     t.addEventListener('pointermove', (e) => {
       if (!active) return;
-      const v = valueAt(e.clientY);
-      this.setValue(v);
-      if (this._opts.onInput) this._opts.onInput(v);
+      if (!dragging) {
+        if (Math.abs(e.clientX - sx) < 8 && Math.abs(e.clientY - sy) < 8) return;
+        dragging = true;
+        haptic(this, 'selection');
+      }
+      set(e.clientY);
     });
-    const end = () => {
+    const end = (cancelled) => {
       if (!active) return;
       active = false;
+      this._trackActive = false;
       t.classList.remove('dragging');
-      if (this._opts.onCommit) this._opts.onCommit(this._value);
+      if (dragging) {
+        if (this._opts.onCommit) this._opts.onCommit(this._value);
+      } else if (!cancelled && this._opts.onTap) {
+        haptic(this, 'light');
+        this._opts.onTap();
+      }
+      dragging = false;
     };
-    t.addEventListener('pointerup', end);
-    t.addEventListener('pointercancel', end);
+    t.addEventListener('pointerup', () => end(false));
+    t.addEventListener('pointercancel', () => end(true));
   }
 }
 customElements.define('ns-sheet', NsSheet);
@@ -773,10 +827,17 @@ class NsBaseCard extends HTMLElement {
     this._raf = requestAnimationFrame(() => {
       this._raf = null;
       this._render();
+      // An open sheet is live: whatever changed on the card - the next track,
+      // play turning to pause, a volume set from elsewhere - goes into it too.
+      if (_sheet && _sheet.ownedBy(this)) _sheet.update(this._sheetOpts());
     });
   }
 
   _sync() { this._scheduleRender(); }
+
+  /* The long-press sheet. Each card states what goes in it in _sheetOpts();
+     the sheet keeps the card as its owner so _scheduleRender can refresh it. */
+  _openSheet() { sheet().open(Object.assign(this._sheetOpts(), { owner: this })); }
 
   /* ---- service calls ---- */
 
@@ -917,7 +978,7 @@ class NsBaseCard extends HTMLElement {
     this._scheduleRender();
   }
 
-  /* subclasses implement: _entityValue, _commit, _onTap, _openSheet, _render, _build */
+  /* subclasses implement: _entityValue, _commit, _onTap, _sheetOpts, _render, _build */
 }
 
 /* ================================================================== *
@@ -1093,7 +1154,7 @@ class NsPanelLightCard extends NsBaseCard {
     else this._call('light', 'turn_on', { brightness_pct: pct });
   }
 
-  _openSheet() {
+  _sheetOpts() {
     const s = this._stateObj;
     const acts = (this._config.presets || []).slice(0, 3).map((p) => ({
       label: p.name || `${p.brightness_pct}%`,
@@ -1106,7 +1167,7 @@ class NsPanelLightCard extends NsBaseCard {
       primary: true,
       run: () => this._call('light', 'toggle'),
     });
-    sheet().open({
+    return {
       title: this._title(),
       state: isOn(s) ? 'On' : 'Off',
       value: this._displayValue(),
@@ -1119,7 +1180,7 @@ class NsPanelLightCard extends NsBaseCard {
         this._scheduleRender();
       },
       onCommit: (v) => this._commit(v),
-    });
+    };
   }
 
   _render() {
@@ -1282,9 +1343,9 @@ class NsPanelCoverCard extends NsBaseCard {
     else this._call('cover', 'close_cover');
   }
 
-  _openSheet() {
+  _sheetOpts() {
     const s = this._stateObj;
-    sheet().open({
+    return {
       title: this._title(),
       state: this._stateText(s, Math.round(this._displayValue() * 100)),
       value: this._displayValue(),
@@ -1303,7 +1364,7 @@ class NsPanelCoverCard extends NsBaseCard {
         this._scheduleRender();
       },
       onCommit: (v) => this._commit(v),
-    });
+    };
   }
 
   _stateText(s, pct) {
@@ -3095,7 +3156,7 @@ class NsPanelClimateCard extends NsBaseCard {
     this._call('climate', 'set_temperature', { temperature: this._degrees(v) });
   }
 
-  _openSheet() {
+  _sheetOpts() {
     const s = this._stateObj;
     const acts = this._hvacModes().map((m) => ({
       label: HVAC_LABELS[m],
@@ -3104,7 +3165,7 @@ class NsPanelClimateCard extends NsBaseCard {
       run: () => this._call('climate', 'set_hvac_mode', { hvac_mode: m }),
     })).slice(0, 4);
 
-    sheet().open({
+    return {
       title: this._title(),
       state: this._stateText(s),
       value: this._displayValue(),
@@ -3117,7 +3178,7 @@ class NsPanelClimateCard extends NsBaseCard {
         this._scheduleRender();
       },
       onCommit: (v) => this._commit(v),
-    });
+    };
   }
 
   _stateText(s) {
@@ -3178,6 +3239,7 @@ class NsPanelClimateCard extends NsBaseCard {
 /* media_player supported_features */
 const MP_PAUSE = 1;
 const MP_VOLUME_SET = 4;
+const MP_VOLUME_MUTE = 8;
 const MP_PREV = 16;
 const MP_NEXT = 32;
 const MP_TURN_OFF = 256;
@@ -3210,6 +3272,8 @@ const MEDIA_CSS = `
 /* Beside the text the art matches the icon box, so a horizontal media card
    lines up with a horizontal light card next to it. Still a fixed box. */
 .card.horizontal .art { width: 52px; height: 52px; border-radius: 12px; }
+/* a muted player keeps its volume on show, in grey */
+.card.muted .value { color: #8e939b; }
 /* the zoomed scale, under the volume, so a full card at 18% explains itself */
 .value .range {
   display: block;
@@ -3260,6 +3324,11 @@ class NsPanelMediaCard extends NsBaseCard {
   _idle() {
     const s = this._stateObj;
     return !s || s.state === 'off' || s.state === 'idle' || s.state === 'standby';
+  }
+
+  _muted() {
+    const s = this._stateObj;
+    return !!(s && s.attributes && s.attributes.is_volume_muted);
   }
 
   _entityValue() {
@@ -3451,7 +3520,7 @@ class NsPanelMediaCard extends NsBaseCard {
     this._bindGestures(this._card);
   }
 
-  _openSheet() {
+  _sheetOpts() {
     const s = this._stateObj;
     const acts = [];
     if (this._supports(MP_PREV)) {
@@ -3478,10 +3547,15 @@ class NsPanelMediaCard extends NsBaseCard {
     }
 
     const lines = this._lines();
-    sheet().open({
+    return {
       title: lines.top,
       state: lines.sub,
       value: this._displayValue(),
+      muted: this._muted(),
+      // a tap on the track mutes / unmutes, where the player can
+      onTap: this._supports(MP_VOLUME_MUTE)
+        ? () => this._call('media_player', 'volume_mute', { is_volume_muted: !this._muted() })
+        : null,
       accent: this._accent(),
       step: this._config.step,
       actions: acts.slice(0, 4),
@@ -3491,7 +3565,7 @@ class NsPanelMediaCard extends NsBaseCard {
         this._scheduleRender();
       },
       onCommit: (v) => this._commit(v),
-    });
+    };
   }
 
   _render() {
@@ -3506,6 +3580,7 @@ class NsPanelMediaCard extends NsBaseCard {
 
     this._card.classList.toggle('unavailable', broken);
     this._card.classList.toggle('on', !idle && !broken);
+    this._card.classList.toggle('muted', this._muted());
     this._elBadge.hidden = !broken;
 
     const span = this._span();

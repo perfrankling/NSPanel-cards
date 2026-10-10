@@ -72,7 +72,7 @@ It starts with installing these cards.
 | --- | --- |
 | **Tap** | Toggle. On a moving cover, stop. |
 | **Drag up / down** | Adjust, relative to the current value. The full card height is the full range. |
-| **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. |
+| **Long-press** (500 ms) | Full-screen control: an absolute slider, big ± steps, preset and action buttons. It stays live while open: a new track, play turning to pause, a change from elsewhere all show. |
 | **Drag sideways** | Released back to the page, so a swipe card still changes page. |
 
 A light or media card with `fill_direction: horizontal` turns the drags around: it fills from the left,
@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.15.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.16.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -331,6 +331,10 @@ tap_service: media_player.media_stop
 tap_data:
   entity_id: media_player.kitchen
 ```
+
+In the long-press sheet, a **tap** on the volume track mutes or unmutes the player; a drag sets
+the volume as usual. A muted player still shows its volume, in grey, on the card and in the
+sheet. A player without mute support keeps the plain slider, where a touch sets the volume.
 
 Buttons grey themselves out when the player does not advertise the feature, and the whole card
 degrades quietly: no `VOLUME_SET` and the fill still tracks your finger, it just does not send
