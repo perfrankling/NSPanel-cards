@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.18.0';
+const NSPANEL_VERSION = '0.18.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -566,6 +566,7 @@ class NsSheet extends HTMLElement {
     this._tlab = this._track.querySelector('.tlab');
     this._tilt = this.shadowRoot.querySelector('.track.tilt');
     this._tiltVal = this._tilt.querySelector('.tval');
+    this._tiltFill = this._tilt.querySelector('.tfill');
     this._tiltLab = this._tilt.querySelector('.tlab');
     this._up = this.shadowRoot.querySelector('.up');
     this._down = this.shadowRoot.querySelector('.down');
@@ -590,7 +591,7 @@ class NsSheet extends HTMLElement {
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
             onTap(), muted, owner, label, actions:[{label, icon, primary, run}],
             stepUp / stepDown: {icon, label, run} in place of the +/- steps,
-            tilt: {value 0..1, label, onInput(v), onCommit(v)} - a second track } */
+            tilt: {value 0..1, label, fromTop, onInput(v), onCommit(v)} - a second track } */
   open(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
     this._owner = opts.owner || null;
@@ -633,6 +634,7 @@ class NsSheet extends HTMLElement {
 
     const tilt = opts.tilt || null;
     this._tilt.hidden = !tilt;
+    this._tiltFill.classList.toggle('from-top', !!(tilt && tilt.fromTop));
     this._tlab.textContent = tilt ? (opts.label || '') : '';
     this._tiltLab.textContent = tilt ? (tilt.label || '') : '';
     if (tilt && !this._active.tilt) this._setTilt(tilt.value);
@@ -1453,6 +1455,8 @@ class NsPanelCoverCard extends NsBaseCard {
     // cover supported_features: OPEN_TILT 16, CLOSE_TILT 32, SET_TILT_POSITION 128
     const tilt = this._supports(128) ? {
       label: 'Tilt',
+      // like position: the fill comes down from the top, covering what is shut
+      fromTop: true,
       value: this._tiltValue(),
       onInput: (v) => {
         this._tiltLocal = v;

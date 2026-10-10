@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.18.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.18.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -232,7 +232,7 @@ down**, dragging left raises it. The name sits beside the icon on a plate, and p
 left out below `height: 160`. `fill_style: solid` paints the blind in the accent, fully opaque.
 
 **Tilt.** In the long-press sheet a cover that can set its tilt gets two tracks side by side,
-**Position** and **Tilt**, each with its own value; releasing the tilt track calls
+**Position** and **Tilt**, each with its own value and both filling down from the top; releasing the tilt track calls
 `set_cover_tilt_position`. A cover that can open and close its tilt gets HA's tilt buttons in
 place of the ± steps - tilt open and tilt close (`open_cover_tilt` / `close_cover_tilt`), with
 curved arrows. A cover without tilt keeps the single track and the ± steps.
