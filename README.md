@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.18.2`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.19.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -470,8 +470,24 @@ buttons:
       message: The panel says hello
 ```
 
-A long-press on a button opens more-info for its entity, which is where you go to find out why
-the scene did not do what you expected.
+A long-press on a button (held `long_press_ms`, 500 ms, with mouse or finger) opens more-info for
+its entity, which is where you go to find out why the scene did not do what you expected.
+`long_press` changes what it opens, for the card or per button: `more-info` (HA's dialog),
+`none`, or `sheet` - the full-screen control the light, cover and media cards open, for the
+button's entity. A cover there gets its Position and Tilt tracks and the tilt buttons, live
+while it is open; any other domain falls back to HA's dialog. Unset, it does what `more_info`
+says. A long-press never also runs the button's action.
+
+```yaml
+type: custom:nspanel-button-card
+columns: 4
+show_name: false
+long_press: sheet
+buttons:
+  - entity: cover.pertemp
+    icon: mdi:stop
+    service: cover.stop_cover
+```
 
 | Option | Default | |
 | --- | --- | --- |
@@ -481,7 +497,9 @@ the scene did not do what you expected.
 | `confirm_text` | `Tap again` | shown while it waits |
 | `feedback_ms` | `1200` | how long the tick holds |
 | `haptics` | `true` | |
-| `more_info` | `true` | long-press opens the dialog |
+| `more_info` | `true` | long-press opens HA's dialog (when `long_press` is not set) |
+| `long_press` | — | `sheet`, `more-info` or `none`; also settable per button |
+| `long_press_ms` | `500` | how long a press is held before it counts as long |
 
 **Lit by something else, in its own colour, or icon only.** A button is lit while its own
 entity is `on` - a running script, a switch, a boolean. `state_entity` lights it from another
@@ -554,7 +572,7 @@ buttons:
 ```
 
 Per button: `entity`, `name`, `icon`, `service`, `data`, `confirm`, `confirm_text`,
-`state_entity`, `color`, `show_name`, `icon_scale`, `color_attribute`, `color_entity`.
+`state_entity`, `color`, `show_name`, `icon_scale`, `color_attribute`, `color_entity`, `long_press`.
 
 ### Swipe
 
