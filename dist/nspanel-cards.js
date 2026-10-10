@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.18.1';
+const NSPANEL_VERSION = '0.18.2';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1476,9 +1476,9 @@ class NsPanelCoverCard extends NsBaseCard {
       value: this._displayValue(),
       label: 'Position',
       tilt,
-      stepUp: tiltButtons ? { icon: 'mdi:rotate-right', label: 'Tilt open',
+      stepUp: tiltButtons ? { icon: 'mdi:rotate-left', label: 'Tilt open',
         run: () => this._call('cover', 'open_cover_tilt') } : null,
-      stepDown: tiltButtons ? { icon: 'mdi:rotate-left', label: 'Tilt close',
+      stepDown: tiltButtons ? { icon: 'mdi:rotate-right', label: 'Tilt close',
         run: () => this._call('cover', 'close_cover_tilt') } : null,
       fromTop: true,
       accent: this._accent(),
