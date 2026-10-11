@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.19.0';
+const NSPANEL_VERSION = '0.20.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1563,29 +1563,40 @@ const INFO_CSS = `
 }
 .big small { font-size: 26px; font-weight: 600; opacity: .7; margin-left: 3px; }
 
-/* a row of 2-4 readings */
-.strip { display: flex; gap: 10px; height: 100%; align-items: stretch; pointer-events: auto; }
+/* the sensor card: the icon, and the number, name and second line beside it,
+   centred in the height - the way the sideways control cards read */
+.content.beside {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+}
+.btext { min-width: 0; }
+
+/* a row of 2-4 readings: no box each, the icon beside its number and name.
+   Numbers are the control cards' 40px; four readings with icons do not fit a
+   Pro 86 across, and show_icons: false is the answer to that, not a smaller
+   number. */
+.strip { display: flex; gap: 16px; height: 100%; align-items: stretch; pointer-events: auto; }
 .cell {
   flex: 1 1 0;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  background: rgba(255,255,255,.06);
-  border-radius: 16px;
-  padding: 12px 10px;
+  align-items: center;
+  gap: 10px;
   cursor: pointer;
 }
-.cell ha-icon { --mdc-icon-size: 22px; color: var(--ns-muted); }
+.cell ha-icon { --mdc-icon-size: 28px; color: var(--ns-muted); flex: none; }
+.cell .ctext { min-width: 0; overflow: hidden; }
 .cell .cv {
-  font-size: 30px;
+  font-size: 40px;
   font-weight: 700;
   line-height: 1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.cell .cv small { font-size: 15px; font-weight: 600; opacity: .65; margin-left: 1px; }
+.cell .cv small { font-size: 20px; font-weight: 600; opacity: .65; margin-left: 2px; }
 .cell .cl {
   font-size: 13px;
   color: var(--ns-muted);
@@ -1946,9 +1957,9 @@ class NsPanelSensorCard extends NsInfoCard {
       ${this._shell()}
         <div class="fillwrap"><div class="fill"></div></div>
         <div class="badge" hidden>Offline</div>
-        <div class="content">
-          <div class="row"><div class="icon"><ha-icon></ha-icon></div></div>
-          <div>
+        <div class="content beside">
+          <div class="icon"><ha-icon></ha-icon></div>
+          <div class="btext">
             <div class="big"></div>
             <div class="name"></div>
             <div class="sub"></div>
@@ -2068,7 +2079,7 @@ class NsPanelSensorsCard extends NsInfoCard {
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.innerHTML = (this._config.show_icons ? '<ha-icon></ha-icon>' : '') +
-        '<div class="cv"></div><div class="cl"></div>';
+        '<div class="ctext"><div class="cv"></div><div class="cl"></div></div>';
       cell.addEventListener('click', () => {
         if (this._config.more_info) moreInfo(this, item.entity);
       });
@@ -2195,6 +2206,9 @@ const BUTTON_CSS = `
    button, and the icon and name pick black or white to stay readable on it.
    After .hot on purpose - the attribute is the state, and it wins. */
 .btn.painted { background: var(--ns-btn-bg); }
+/* the button card's icons are white, lit or not; the switch card shares this
+   sheet and keeps its grey, which is what says "off" there */
+.bpad .btn ha-icon, .bpad .btn.hot ha-icon { color: var(--ns-text); }
 .btn.painted ha-icon, .btn.painted .bl { color: var(--ns-btn-fg); }
 .btn[disabled] { opacity: .45; }
 `;
@@ -2429,7 +2443,7 @@ class NsPanelButtonCard extends NsInfoCard {
     this._built = true;
     this.shadowRoot.innerHTML = `
       ${this._shell()}
-        <div class="content"><div class="pad"></div></div>
+        <div class="content"><div class="pad bpad"></div></div>
       </div>
     `;
     this._card = this.shadowRoot.querySelector('.card');

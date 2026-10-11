@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.19.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.20.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -531,7 +531,8 @@ buttons:
 | `icon_scale` | `1` | enlarges (or shrinks) the icons; also settable per button |
 | `colors` | — | maps colour names from `color_attribute` to your own colours |
 
-An icon-only button sizes its icon to the button, 60% of its shorter side, so a tall button
+The icons are white, lit or not; a lit button shows in its background and its name. An
+icon-only button sizes its icon to the button, 60% of its shorter side, so a tall button
 gets a big icon. Some custom icon sets draw their shape with a margin inside the icon's frame
 and still come out small; `icon_scale: 1.4` (or whatever looks right) makes up for it.
 
@@ -835,7 +836,8 @@ severity:
 </tr>
 </table>
 
-`min` and `max` turn the card into a bar; without both, it is just the number. `severity`
+The icon sits on the left with the number, name and second line beside it. `min` and `max`
+turn the card into a bar; without both, it is just the number. `severity`
 recolours it — the last matching `above` wins, so the list reads the way you would say it.
 `secondary` puts a second entity on the line underneath, which is the lower card in the
 picture:
@@ -863,6 +865,7 @@ height: 222
 type: custom:nspanel-sensors-card
 title: Outside
 height: 144
+show_icons: false
 entities:
   - entity: sensor.outside_temp
     name: Outside
@@ -873,8 +876,10 @@ entities:
 ```
 
 Two to four entities; a fifth is ignored rather than squeezed in. An entry is either a bare
-`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`. `show_icons: false`
-drops the icons and gives the numbers the room.
+`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`. Each reading is its
+icon with the number and name beside it, no box around it. The numbers are 40px, the size of
+the control cards'; three or four readings with icons do not fit a Pro 86 across, and
+`show_icons: false` drops the icons and gives the numbers the room.
 
 ### Status
 
@@ -1035,6 +1040,7 @@ An information page for the same panel:
     - type: custom:nspanel-sensors-card
       title: Outside
       height: 144
+      show_icons: false
       entities:
         - entity: sensor.outside_temp
           name: Outside
