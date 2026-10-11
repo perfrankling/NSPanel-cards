@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.20.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.21.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -959,6 +959,17 @@ No entity required. If you give it one, its state — or its `message` attribute
 a calendar puts the event title in — becomes the line under the date. That is the lower card
 in the weather picture above. `show_seconds: true` re-arms the timer every second instead of
 every minute; the panel can take it, but it is one more thing running.
+
+`clock_size` sets the digits' size in px, 24–160 (default 88); the am/pm and the date scale with
+it - the same option, and the same meaning, as the app's screensaver clock.
+
+| Option | Default | |
+| --- | --- | --- |
+| `hour_24` | `true` | |
+| `show_date` | `true` | |
+| `show_seconds` | `false` | |
+| `clock_size` | `88` | digit size in px, 24–160 |
+| `entity` | — | its state or `message` is the line under the date |
 
 ### Shared options
 

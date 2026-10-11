@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.20.0';
+const NSPANEL_VERSION = '0.21.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1675,16 +1675,25 @@ const INFO_CSS = `
 .clear ha-icon { --mdc-icon-size: 44px; color: var(--ns-accent); }
 .clear div { font-size: 18px; font-weight: 600; }
 
-/* clock */
+/* clock. --ns-clock is clock_size, the digits' font size; am/pm and the date
+   scale with it, so 64 and 120 look like the same clock at two sizes - the
+   way the app's screensaver clock does it */
 .clock-t {
-  font-size: 88px;
+  font-size: calc(var(--ns-clock, 88) * 1px);
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
 }
-.clock-t small { font-size: 34px; font-weight: 600; opacity: .55; margin-left: 4px; }
-.clock-d { font-size: 20px; font-weight: 600; color: var(--ns-muted); margin-top: 10px; }
+.clock-t small {
+  font-size: calc(var(--ns-clock, 88) * 34px / 88);
+  font-weight: 600; opacity: .55; margin-left: 4px;
+}
+.clock-d {
+  font-size: calc(var(--ns-clock, 88) * 20px / 88);
+  font-weight: 600; color: var(--ns-muted);
+  margin-top: calc(var(--ns-clock, 88) * 10px / 88);
+}
 
 /* weather forecast strip */
 .fc { display: flex; gap: 8px; margin-top: 14px; }
@@ -4150,7 +4159,7 @@ class NsPanelClockCard extends NsInfoCard {
   static get requiresEntity() { return false; }
   static get accent() { return '#7cc4ff'; }
   static get defaultOptions() {
-    return { hour_24: true, show_date: true, show_seconds: false, entity: null };
+    return { hour_24: true, show_date: true, show_seconds: false, entity: null, clock_size: 88 };
   }
 
   static getStubConfig() { return { height: 200 }; }
@@ -4174,6 +4183,9 @@ class NsPanelClockCard extends NsInfoCard {
       </div>
     `;
     this._card = this.shadowRoot.querySelector('.card');
+    // clamped as the screensaver's clock_size is: 24-160
+    const size = clamp(Number(this._config.clock_size) || 88, 24, 160);
+    this._card.style.setProperty('--ns-clock', String(size));
     this._elTime = this.shadowRoot.querySelector('.clock-t');
     this._elDate = this.shadowRoot.querySelector('.clock-d');
     this._elSub = this.shadowRoot.querySelector('.sub');
@@ -4430,6 +4442,7 @@ const EDITOR_LABELS = {
   follow_color: 'Use the light\'s own colour',
   fill_direction: 'Fill direction',
   fill_style: 'Fill style',
+  clock_size: 'Clock digits (px, 24-160)',
   volume_zoom: 'Quiet scale: card spans 0 to (%, 0 = off)',
   volume_zoom_below: 'Quiet scale below (%)',
   tap_entity: 'Tap runs this entity (instead of play/pause)',
@@ -4739,6 +4752,7 @@ const CLOCK_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'hour_24', selector: { boolean: {} } },
       { name: 'show_date', selector: { boolean: {} } },
+      { name: 'clock_size', selector: { number: { min: 24, max: 160, step: 2, mode: 'box' } } },
       { name: 'show_seconds', selector: { boolean: {} } },
       { name: 'more_info', selector: { boolean: {} } },
     ],
