@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.21.0';
+const NSPANEL_VERSION = '0.22.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1064,7 +1064,7 @@ class NsPanelLightCard extends NsBaseCard {
   static get domain() { return 'light'; }
   static get accent() { return '#ffb74a'; }
   static get defaultOptions() {
-    return { follow_color: true, fill_direction: 'vertical', fill_style: 'tint' };
+    return { follow_color: true, fill_direction: 'vertical', fill_style: 'tint', show_value: true };
   }
 
   static getStubConfig(hass) {
@@ -1281,7 +1281,9 @@ class NsPanelLightCard extends NsBaseCard {
     if (this._valueShown !== pct || this._onShown !== on) {
       this._valueShown = pct;
       this._onShown = on;
-      this._elValue.innerHTML = on ? `${pct}<small>%</small>` : '';
+      // show_value: false leaves the big number out (its plate goes with it,
+      // through .value:empty); the state line under the name keeps the level.
+      this._elValue.innerHTML = on && this._config.show_value ? `${pct}<small>%</small>` : '';
       this._elSub.textContent = broken ? 'Unavailable' : (on ? `On · ${pct}%` : 'Off');
     }
   }
@@ -4440,6 +4442,7 @@ const EDITOR_LABELS = {
   haptics: 'Haptics',
   more_info: 'Tap opens more-info',
   follow_color: 'Use the light\'s own colour',
+  show_value: 'Show the percentage',
   fill_direction: 'Fill direction',
   fill_style: 'Fill style',
   clock_size: 'Clock digits (px, 24-160)',
@@ -4794,6 +4797,7 @@ const FILL_SCHEMA = [
 const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
+  { name: 'show_value', selector: { boolean: {} } },
 ], FILL_SCHEMA);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([
