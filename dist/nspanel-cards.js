@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.22.1';
+const NSPANEL_VERSION = '0.22.2';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -663,8 +663,10 @@ class NsSheet extends HTMLElement {
         `<span>${a.label}</span>`;
       b.addEventListener('click', () => {
         haptic(this, 'light');
+        // No action closes the sheet: it updates in place, so the result of a
+        // tap shows here, and a wrong tap is one more tap to undo - not a
+        // long-press to come back. The X and the scrim close it.
         a.run();
-        if (a.close !== false) this.close();
       });
       this._actions.appendChild(b);
     });
@@ -1485,14 +1487,12 @@ class NsPanelCoverCard extends NsBaseCard {
       fromTop: true,
       accent: this._accent(),
       step: this._config.step,
-      // none of the three closes the sheet: the cover takes a while, and the
-      // sheet is where you watch it go and stop it
       actions: [
-        { label: 'Open', icon: 'mdi:arrow-up', close: false,
+        { label: 'Open', icon: 'mdi:arrow-up',
           run: () => this._call('cover', 'open_cover') },
-        { label: 'Stop', icon: 'mdi:stop', primary: true, close: false,
+        { label: 'Stop', icon: 'mdi:stop', primary: true,
           run: () => this._call('cover', 'stop_cover') },
-        { label: 'Close', icon: 'mdi:arrow-down', close: false,
+        { label: 'Close', icon: 'mdi:arrow-down',
           run: () => this._call('cover', 'close_cover') },
       ],
       onInput: (v) => {
@@ -3849,18 +3849,17 @@ class NsPanelMediaCard extends NsBaseCard {
     const acts = [];
     if (this._supports(MP_PREV)) {
       acts.push({ label: 'Previous', icon: 'mdi:skip-previous',
-        close: false, run: () => this._call('media_player', 'media_previous_track') });
+        run: () => this._call('media_player', 'media_previous_track') });
     }
     acts.push({
       label: this._playing() ? 'Pause' : 'Play',
       icon: this._playing() ? 'mdi:pause' : 'mdi:play',
       primary: true,
-      close: false,
       run: () => this._call('media_player', 'media_play_pause'),
     });
     if (this._supports(MP_NEXT)) {
       acts.push({ label: 'Next', icon: 'mdi:skip-next',
-        close: false, run: () => this._call('media_player', 'media_next_track') });
+        run: () => this._call('media_player', 'media_next_track') });
     }
     if (this._supports(MP_STOP)) {
       acts.push({ label: 'Stop', icon: 'mdi:stop',
