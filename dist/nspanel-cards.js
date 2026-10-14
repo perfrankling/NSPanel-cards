@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.22.0';
+const NSPANEL_VERSION = '0.22.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1485,11 +1485,15 @@ class NsPanelCoverCard extends NsBaseCard {
       fromTop: true,
       accent: this._accent(),
       step: this._config.step,
+      // none of the three closes the sheet: the cover takes a while, and the
+      // sheet is where you watch it go and stop it
       actions: [
-        { label: 'Open', icon: 'mdi:arrow-up', run: () => this._call('cover', 'open_cover') },
+        { label: 'Open', icon: 'mdi:arrow-up', close: false,
+          run: () => this._call('cover', 'open_cover') },
         { label: 'Stop', icon: 'mdi:stop', primary: true, close: false,
           run: () => this._call('cover', 'stop_cover') },
-        { label: 'Close', icon: 'mdi:arrow-down', run: () => this._call('cover', 'close_cover') },
+        { label: 'Close', icon: 'mdi:arrow-down', close: false,
+          run: () => this._call('cover', 'close_cover') },
       ],
       onInput: (v) => {
         this._local = v;
