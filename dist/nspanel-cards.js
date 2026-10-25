@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.22.2';
+const NSPANEL_VERSION = '0.23.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -137,6 +137,17 @@ function friendly(stateObj, entityId) {
 
 /* Shared design tokens. One string, injected into every shadow root, so the
    browser parses it once per card rather than once per rule. */
+/* `radius`: the card's corner, 0-40 px (22 is the design's). The rounded
+   things inside a card - icon box, plates, chips, buttons, album art - scale
+   with it through --ns-rk, so a button never ends up rounder than the card
+   around it. Set on the host, where an inline style outranks :host. */
+function applyRadius(host, cfg) {
+  const n = Number(cfg.radius);
+  const r = cfg.radius == null || cfg.radius === '' || isNaN(n) ? 22 : clamp(n, 0, 40);
+  host.style.setProperty('--ns-radius', r + 'px');
+  host.style.setProperty('--ns-rk', String(r / 22));
+}
+
 const BASE_CSS = `
 :host {
   --ns-ground: #0b0d10;
@@ -258,7 +269,7 @@ const BASE_CSS = `
 .icon {
   width: 52px;
   height: 52px;
-  border-radius: 16px;
+  border-radius: calc(var(--ns-rk, 1) * 16px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -316,13 +327,13 @@ const BASE_CSS = `
   gap: 12px;
   min-width: 0;
   padding: 8px 16px 8px 8px;
-  border-radius: 20px;
+  border-radius: calc(var(--ns-rk, 1) * 20px);
   background: var(--ns-surface);
 }
 .card.horizontal .value {
   flex: none;
   padding: 8px 12px;
-  border-radius: 16px;
+  border-radius: calc(var(--ns-rk, 1) * 16px);
   background: var(--ns-surface);
 }
 .card.horizontal .value:empty { display: none; }
@@ -338,7 +349,7 @@ const BASE_CSS = `
   min-width: 0;
   height: 56px;
   border: 0;
-  border-radius: 14px;
+  border-radius: calc(var(--ns-rk, 1) * 14px);
   background: rgba(0,0,0,.28);
   color: #fff;
   font-family: inherit;
@@ -822,7 +833,9 @@ class NsBaseCard extends HTMLElement {
       swipe_safe: true,        // release drags across the fill back to the page
       show_presets: true,
       long_press: 'sheet',
+      radius: 22,
     }, this.constructor.defaultOptions, config);
+    applyRadius(this, this._config);
     // Presets have to be settled here, not in a subclass after super() returns:
     // _build() below reads them, so a config without a `presets` key - which is
     // what getStubConfig and the GUI editor both hand over - used to throw.
@@ -1632,7 +1645,7 @@ const INFO_CSS = `
   gap: 10px;
   padding: 0 12px;
   border: 0;
-  border-radius: 14px;
+  border-radius: calc(var(--ns-rk, 1) * 14px);
   background: rgba(255,255,255,.06);
   color: var(--ns-text);
   font-family: inherit;
@@ -1707,7 +1720,7 @@ const INFO_CSS = `
   flex: 1 1 0;
   min-width: 0;
   background: rgba(255,255,255,.06);
-  border-radius: 12px;
+  border-radius: calc(var(--ns-rk, 1) * 12px);
   padding: 8px 2px 10px;
   text-align: center;
 }
@@ -1822,7 +1835,9 @@ class NsInfoCard extends HTMLElement {
       height: 200,
       accent: null,
       more_info: true,
+      radius: 22,
     }, this.constructor.defaultOptions, config || {});
+    applyRadius(this, this._config);
     this._built = false;
     this._teardown();
     if (this.shadowRoot) this._build();
@@ -2172,7 +2187,7 @@ const BUTTON_CSS = `
   gap: 8px;
   padding: 8px;
   border: 0;
-  border-radius: 18px;
+  border-radius: calc(var(--ns-rk, 1) * 18px);
   background: var(--ns-surface-2);
   color: var(--ns-text);
   font-family: inherit;
@@ -2822,7 +2837,7 @@ const ALARM_CSS = `
 .al .ab {
   flex: 1 1 0; min-width: 0;
   display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 0 12px; border: 0; border-radius: 16px;
+  padding: 0 12px; border: 0; border-radius: calc(var(--ns-rk, 1) * 16px);
   background: var(--ns-surface-2); color: var(--ns-text);
   font-family: inherit; font-size: 17px; font-weight: 600;
   cursor: pointer; -webkit-tap-highlight-color: transparent; touch-action: manipulation;
@@ -3574,7 +3589,7 @@ const MEDIA_CSS = `
 .art {
   width: 76px;
   height: 76px;
-  border-radius: 14px;
+  border-radius: calc(var(--ns-rk, 1) * 14px);
   overflow: hidden;
   flex: none;
   background: rgba(255,255,255,.10);
@@ -3595,7 +3610,7 @@ const MEDIA_CSS = `
 .chip, .card:not(.on) .chip { background: var(--ns-surface-2); }
 /* Beside the text the art matches the icon box, so a horizontal media card
    lines up with a horizontal light card next to it. Still a fixed box. */
-.card.horizontal .art { width: 52px; height: 52px; border-radius: 12px; }
+.card.horizontal .art { width: 52px; height: 52px; border-radius: calc(var(--ns-rk, 1) * 12px); }
 /* a muted player keeps its volume on show, in grey */
 .card.muted .value { color: #8e939b; }
 /* the zoomed scale, under the volume, so a full card at 18% explains itself */
@@ -4394,6 +4409,7 @@ class NsPanelProbeCard extends HTMLElement {
  * ================================================================== */
 
 const EDITOR_LABELS = {
+  radius: 'Corner radius (px, 0-40)',
   entity: 'Entity',
   presets: 'Presets',
   entities: 'Entities',
@@ -4541,6 +4557,7 @@ const SHARED_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },
@@ -4675,6 +4692,7 @@ const INFO_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },
@@ -4751,6 +4769,7 @@ const CLOCK_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },
@@ -4843,6 +4862,7 @@ const BUTTON_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },
@@ -4920,6 +4940,7 @@ const SWITCH_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },
@@ -4956,6 +4977,7 @@ const ALARM_SCHEMA = [
     name: '', type: 'grid', schema: [
       { name: 'icon', selector: { icon: {} } },
       { name: 'height', selector: { number: { min: 60, max: MAX_CARD_HEIGHT, step: 2, mode: 'box' } } },
+      { name: 'radius', selector: { number: { min: 0, max: 40, step: 1, mode: 'box' } } },
     ],
   },
   { name: 'accent', selector: { text: {} } },

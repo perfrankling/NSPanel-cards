@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.22.2`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.23.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -982,6 +982,7 @@ it - the same option, and the same meaning, as the app's screensaver clock.
 | `icon` | domain default | |
 | `height` | `200` | card height in px; the editor's spinner stops at 900, YAML does not |
 | `accent` | amber / sky | any hex |
+| `radius` | `22` | the card's corner radius in px, 0–40; the icon box, plates, buttons and album art inside scale with it |
 | `presets` | 3 sensible ones | max 4 shown on the card |
 | `show_presets` | `true` | `false` hides the row of preset buttons on the card |
 | `live` | `false` | send updates mid-drag, throttled to 400 ms |
@@ -995,8 +996,9 @@ it - the same option, and the same meaning, as the app's screensaver clock.
 | `more_info` | `true` | open HA's more-info dialog: on tap for the information and climate cards, on long-press for buttons; the media card defaults it to `false` because its tap is play/pause |
 
 The drag, preset and long-press options apply to the control cards. The information cards take
-`entity`/`entities`, `title`, `icon`, `height`, `accent` and `more_info`, plus whatever is
-listed in their own section above.
+`entity`/`entities`, `title`, `icon`, `height`, `accent`, `radius` and `more_info`, plus
+whatever is listed in their own section above. `radius` works on every card, the buttons,
+switches and alarm included; the full-screen control and the keypad keep their own corners.
 
 ### A full 480×480 panel view
 
