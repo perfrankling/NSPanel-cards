@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.25.1';
+const NSPANEL_VERSION = '0.25.2';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -4506,7 +4506,7 @@ function timeTicks(t0, t1, hours) {
    ticks to label it with. The value range snaps outwards to round grid lines,
    so the top and bottom of the graph are always labelled values. `live` (a
    number or null) extends the line to now. */
-function seriesPaths(series, hours, live, band) {
+function seriesPaths(series, hours, live, band, parts) {
   const now = Date.now();
   const t0 = now - clamp(Number(hours) || 24, 1, 168) * 3600e3;
   const pts = series.points.filter((p) => p.t >= t0);
@@ -4517,7 +4517,8 @@ function seriesPaths(series, hours, live, band) {
     hi = Math.max(hi, band ? p.hi : p.v);
   });
   if (live !== null) { lo = Math.min(lo, live); hi = Math.max(hi, live); }
-  const step = niceStep(hi - lo || Math.max(Math.abs(hi) * 0.1, 1), 4);
+  // about six bands between lines: 7-12 degrees gets a line every degree
+  const step = niceStep(hi - lo || Math.max(Math.abs(hi) * 0.1, 1), parts || 6);
   let bottom = Math.floor(lo / step) * step;
   let top = Math.ceil(hi / step) * step;
   if (top - bottom < step) top = bottom + step;
@@ -4545,13 +4546,19 @@ function seriesPaths(series, hours, live, band) {
 /* Tick labels are HTML over the SVG - text inside a viewBox stretched with
    preserveAspectRatio="none" would stretch with it. A pool of spans, reused:
    only textContent and one position change when the ticks move. */
-function placeTicks(box, ticks, axis) {
+function placeTicks(box, ticks, axis, every, gapPx) {
   while (box.children.length < ticks.length) box.appendChild(document.createElement('span'));
+  const n = every || 1;
   Array.from(box.children).forEach((el, i) => {
     const t = ticks[i];
-    el.hidden = !t;
+    // thinned from the top down, so the highest line always keeps its value.
+    // The top value sits under its line and the rest above theirs, so with
+    // the lines close together the next labelled one down gives way.
+    const fromTop = ticks.length - 1 - i;
+    el.hidden = !t || fromTop % n !== 0 || (axis === 'y' && fromTop === n && n * (gapPx || 99) < 30);
     if (!t) return;
     if (el.textContent !== t.label) el.textContent = t.label;
+    if (axis === 'y') el.classList.toggle('top', i === ticks.length - 1);
     const pos = (t.f * 100).toFixed(2) + '%';
     if (axis === 'y') el.style.top = pos; else el.style.left = pos;
   });
@@ -4591,13 +4598,13 @@ const GRAPH_CSS = `
 .ggrid { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .gyt { position: absolute; inset: 0; }
 .gyt span {
-  position: absolute; left: 8px; transform: translateY(25%);
+  position: absolute; left: 8px; transform: translateY(-125%);
   font-size: 11px; line-height: 1; color: var(--ns-muted); font-variant-numeric: tabular-nums;
   text-shadow: 0 0 3px #16191f, 0 0 3px #16191f;
 }
-/* each value just under its line, so the top one stays inside the graph -
-   except the bottom line's, which goes above it for the same reason */
-.gyt span:first-child { transform: translateY(-125%); }
+/* each value just above its line - except the top line's, which goes under
+   it so it stays inside the graph */
+.gyt span.top { transform: translateY(25%); }
 /* the card's graph is short: the bottom value would sit on the next one up,
    and the card's own edge says where the bottom is */
 .gyt span:first-child { display: none; }
@@ -4655,13 +4662,13 @@ const GRAPH_VIEW_CSS = `
 .ggrid { fill: none; stroke: rgba(255,255,255,.09); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .gyt { position: absolute; inset: 0; pointer-events: none; }
 .gyt span {
-  position: absolute; left: 8px; transform: translateY(25%);
+  position: absolute; left: 8px; transform: translateY(-125%);
   font-size: 12px; line-height: 1; color: var(--ns-muted); font-variant-numeric: tabular-nums;
   text-shadow: 0 0 3px #16191f, 0 0 3px #16191f;
 }
-/* each value just under its line, so the top one stays inside the graph -
-   except the bottom line's, which goes above it for the same reason */
-.gyt span:first-child { transform: translateY(-125%); }
+/* each value just above its line - except the top line's, which goes under
+   it so it stays inside the graph */
+.gyt span.top { transform: translateY(25%); }
 .empty { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: var(--ns-muted); font-size: 15px; }
 .axis { position: relative; height: 16px; margin-top: -4px; font-size: 12px;
@@ -4946,7 +4953,10 @@ class NsPanelGraphCard extends NsInfoCard {
     this._line.setAttribute('d', p.line);
     this._band.setAttribute('d', p.area);
     this._grid.setAttribute('d', p.grid);
-    placeTicks(this._yt, p.yt, 'y');
+    // labels need ~18px each: in a short card every other line keeps one
+    const graphH = Math.max(40, Number(cfg.height || 200) - 84);
+    const gap = graphH / Math.max(1, p.yt.length - 1);
+    placeTicks(this._yt, p.yt, 'y', Math.max(1, Math.ceil(18 / gap)), gap);
     this._elHi.textContent = '↑ ' + fmt(p.hi, cfg.decimals);
     this._elLo.textContent = '↓ ' + fmt(p.lo, cfg.decimals);
   }
