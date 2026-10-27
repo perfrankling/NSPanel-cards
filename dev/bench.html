@@ -207,6 +207,9 @@ const hass = {
       { friendly_name: 'Wind Speed', unit_of_measurement: 'km/h',
         device_class: 'wind_speed' }),
 
+    'sensor.house_power': st('sensor.house_power', '1840',
+      { friendly_name: 'House power', unit_of_measurement: 'W', device_class: 'power',
+        state_class: 'measurement' }),
     'binary_sensor.front_door': st('binary_sensor.front_door', 'off',
       { friendly_name: 'Front Door Contact', device_class: 'door' }),
     'binary_sensor.back_door': st('binary_sensor.back_door', 'on',
@@ -274,7 +277,40 @@ const hass = {
   callService(domain, service, data) {
     console.log('callService', domain + '.' + service, data);
   },
+  callWS(msg) {
+    if (msg.type === 'recorder/statistics_during_period') {
+      return new Promise((r) => setTimeout(() => r(mockStatistics(msg, hass.states)), 60));
+    }
+    return Promise.reject(new Error('not mocked: ' + msg.type));
+  },
 };
+
+/* Statistics for the graph card and the long-press graph: a day's curve
+   around the sensor's current value, deterministic so screenshots repeat. */
+function mockStatistics(msg, states) {
+  const out = {};
+  const step = msg.period === 'hour' ? 3600e3 : 300e3;
+  const start = Date.parse(msg.start_time);
+  (msg.statistic_ids || []).forEach((id) => {
+    const s = states[id];
+    const now = s ? parseFloat(s.state) : NaN;
+    if (!isFinite(now)) return;
+    const power = /W$/.test(String((s.attributes || {}).unit_of_measurement || ''));
+    const rows = [];
+    let k = 0;
+    for (let t = Math.floor(start / step) * step; t < Date.now() - step; t += step, k++) {
+      const day = Math.sin(((t / 3600e3) % 24 - 9) / 24 * 2 * Math.PI);
+      const wob = Math.sin(k * 1.7) * 0.5 + Math.sin(k * 0.37) * 0.5;
+      const base = power ? Math.max(0, now * (0.6 + 0.5 * day) + now * 0.25 * wob)
+        : now + 2.2 * day + 0.3 * wob;
+      const spread = power ? now * 0.35 : 0.25;
+      rows.push({ start: t, end: t + step, mean: base, min: power ? Math.max(0, base - spread) : base - spread, max: base + spread });
+    }
+    out[id] = rows;
+  });
+  return out;
+}
+
 
 function card(type, config, mount) {
   const el = document.createElement(type);

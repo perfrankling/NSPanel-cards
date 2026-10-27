@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## What this is
 
-A HACS-installable Lovelace plugin: fifteen custom cards (plus one config-only element) for
+A HACS-installable Lovelace plugin: sixteen custom cards (plus one config-only element) for
 the **Sonoff NSPanel Pro**, both sizes — the **Pro 86** (square 480×480, Rockchip PX30) and the
 **Pro 120** (4.7″ 750×1334, Rockchip RK3326S). Both are 2 GB / Mali-G31 / Android 8.1, so the
 performance rules below are not per-model: they hold on both. The 120 is bigger in *both*
@@ -19,8 +19,12 @@ Cards, in two families:
   `nspanel-climate-card`, `nspanel-media-card`. Gesture engine, echo window, one entity each.
   What the drag sets differs per card: brightness, position, target temperature, volume.
 - **Information** (`NsInfoCard`): `nspanel-sensor-card`, `nspanel-sensors-card`,
-  `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`. Read-only, often several
-  entities, tap opens more-info.
+  `nspanel-status-card`, `nspanel-weather-card`, `nspanel-clock-card`, `nspanel-graph-card`.
+  Read-only, often several entities, tap opens more-info. The graph card, the sensor card and
+  each reading of the sensors card open the full-screen graph (`ns-graph-view`) on a
+  long-press. Graph data is HA's statistics (`recorder/statistics_during_period`), asked for
+  only while on screen, with recorded history as the fallback for sensors without a
+  state_class; `wsCall` reaches HA, the kiosk socket and the bench mock alike.
 - **Actions** (`NsInfoCard` too, since it needs the multi-entity diff and the timers but no
   drag): `nspanel-button-card`. Scenes, scripts, automations. `nspanel-switch-card`: the
   same grid for switches, input booleans and fans, but reflecting state, with the tap
@@ -173,7 +177,7 @@ Ordered top to bottom, separated by banner comments:
 Miss (3) and the GUI silently drops the option from any card the user edits. `dev/editor.html`
 prints a sync check comparing (1) against (3) for **every** card - open it after touching
 options (`python dev/serve.py 8177`, then headless Chrome `--dump-dom` on
-`http://localhost:8177/dev/editor.html`); all twelve rows should say `ok`. Only the legacy
+`http://localhost:8177/dev/editor.html`); every row should say `ok`. Only the legacy
 `name` is exempt. Lists of objects (`presets`, `entities`, `buttons`, `switches`, `severity`)
 are drawn by HA's object selector - `listOf(fields, labelField, descField)` - which shows one
 row per item and a form per item built from `fields`; a key of an item that is not a field

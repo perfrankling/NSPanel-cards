@@ -14,6 +14,33 @@
  */
 (function () {
   const now = () => new Date().toISOString();
+
+  /* Statistics for the graph card and the long-press graph: a day's curve
+     around the sensor's current value, deterministic so screenshots repeat. */
+  function mockStatistics(msg, states) {
+    const out = {};
+    const step = msg.period === 'hour' ? 3600e3 : 300e3;
+    const start = Date.parse(msg.start_time);
+    (msg.statistic_ids || []).forEach((id) => {
+      const s = states[id];
+      const now = s ? parseFloat(s.state) : NaN;
+      if (!isFinite(now)) return;
+      const power = /W$/.test(String((s.attributes || {}).unit_of_measurement || ''));
+      const rows = [];
+      let k = 0;
+      for (let t = Math.floor(start / step) * step; t < Date.now() - step; t += step, k++) {
+        const day = Math.sin(((t / 3600e3) % 24 - 9) / 24 * 2 * Math.PI);
+        const wob = Math.sin(k * 1.7) * 0.5 + Math.sin(k * 0.37) * 0.5;
+        const base = power ? Math.max(0, now * (0.6 + 0.5 * day) + now * 0.25 * wob)
+          : now + 2.2 * day + 0.3 * wob;
+        const spread = power ? now * 0.35 : 0.25;
+        rows.push({ start: t, end: t + step, mean: base, min: power ? Math.max(0, base - spread) : base - spread, max: base + spread });
+      }
+      out[id] = rows;
+    });
+    return out;
+  }
+
   const st = (entity_id, state, attributes) => ({
     entity_id, state, attributes: attributes || {},
     last_changed: now(), last_updated: now(), context: { id: 'mock' },
@@ -182,6 +209,11 @@
       if (msg.type === 'unsubscribe_events') {
         this._subs.delete(msg.subscription);
         this._recv({ id: msg.id, type: 'result', success: true, result: null });
+        return;
+      }
+      if (msg.type === 'recorder/statistics_during_period') {
+        const result = mockStatistics(msg, STATES);
+        setTimeout(() => this._recv({ id: msg.id, type: 'result', success: true, result }), 40);
         return;
       }
       if (msg.type === 'call_service') {

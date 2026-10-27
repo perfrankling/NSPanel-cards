@@ -59,8 +59,9 @@ It starts with installing these cards.
 
 | Card | What it does |
 | --- | --- |
-| `custom:nspanel-sensor-card` | One reading, at 64px. Optional range bar and severity colours. |
-| `custom:nspanel-sensors-card` | Two to four readings side by side, for a page that has to earn its space. |
+| `custom:nspanel-sensor-card` | One reading, at 64px. Optional range bar and severity colours. Long-press for its graph. |
+| `custom:nspanel-sensors-card` | Two to four readings side by side, for a page that has to earn its space. Long-press a reading for its graph. |
+| `custom:nspanel-graph-card` | A sensor's last 24 hours (or 1–168) from Home Assistant's statistics: the mean as a line, the minimum to maximum as a band. Temperatures and power alike. |
 | `custom:nspanel-status-card` | Doors, windows, locks, leaks. Quiet when all is well; with `only_problems` the usual state of the card is empty. |
 | `custom:nspanel-weather-card` | Current conditions and a short forecast. |
 | `custom:nspanel-clock-card` | Time, date, and an optional line from any entity. For the page a panel idles on. |
@@ -115,7 +116,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.24.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.25.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -877,7 +878,10 @@ entities:
 ```
 
 Two to four entities; a fifth is ignored rather than squeezed in. An entry is either a bare
-`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`.
+`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`. Each reading is its
+icon with the number and name beside it, no box around it. The numbers are 40px, the size of
+the control cards'; three or four readings with icons do not fit a Pro 86 across, and
+`show_icons: false` drops the icons and gives the numbers the room.
 
 An entry can also be the time, on the panel's own clock rather than an entity such as
 `sensor.time` (which only changes when Home Assistant gets round to sending it):
@@ -893,10 +897,44 @@ entities:
     show_seconds: false  # default
 ```
 
-It updates on the minute (on the second with `show_seconds`), and a tap on it does nothing. Each reading is its
-icon with the number and name beside it, no box around it. The numbers are 40px, the size of
-the control cards'; three or four readings with icons do not fit a Pro 86 across, and
-`show_icons: false` drops the icons and gives the numbers the room.
+It updates on the minute (on the second with `show_seconds`), and a tap on it does nothing.
+
+### Graph
+
+```yaml
+type: custom:nspanel-graph-card
+entity: sensor.outside_temp
+title: Outside
+hours: 24
+```
+
+The current value and name at the top, the high and low of the range on the right, and the
+graph across the bottom of the card: the mean per five minutes as a line, the minimum to
+maximum as a band behind it.
+
+The data is Home Assistant's **statistics**, which the recorder already keeps for every sensor
+with a `state_class` (temperature, humidity, power and most others). That is a few hundred
+points whatever the sensor does - a power meter reporting every second costs what a
+thermometer does. A sensor without statistics falls back to its recorded history, averaged
+into the same five minutes. Over 48 hours the points are hourly.
+
+The card asks Home Assistant for data only while it is on screen, and again every five
+minutes; in between, the end of the line follows the live value. It is never animated.
+
+| Option | Default | |
+| --- | --- | --- |
+| `entity` | — | required; any sensor with a number for a state |
+| `hours` | `24` | how far back, 1–168 |
+| `show_minmax` | `true` | the min-to-max band behind the line |
+| `unit` | the entity's | |
+| `decimals` | automatic | for the value and the high/low |
+| `long_press` | `graph` | or `none` |
+
+Plus `title`, `height`, `accent`, `radius` and `more_info` (tap) as on every information card.
+
+**Long-press for a graph.** Holding the graph card, a sensor card or one reading of a sensors
+card for half a second opens the same graph full-screen, with 6 h, 24 h, 3 d and 7 d to pick
+from; the X or a tap outside closes it. `long_press: none` on any of the three turns it off.
 
 ### Status
 

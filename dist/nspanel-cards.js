@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.24.0';
+const NSPANEL_VERSION = '0.25.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1853,6 +1853,7 @@ class NsInfoCard extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
+    if (_graphView && _graphView.ownedBy(this)) _graphView.hass = hass;
     if (!this._config) return;
     this._afterHass(prev);
     if (prev) {
@@ -1909,9 +1910,56 @@ class NsInfoCard extends HTMLElement {
      history and settings already live. Nothing worth reimplementing. */
   _bindMoreInfo(surface, entityIdFn) {
     surface.addEventListener('click', () => {
+      if (this._longPressed()) return;
       if (!this._config.more_info) return;
       const id = entityIdFn ? entityIdFn() : this._config.entity;
       if (id) moreInfo(this, id);
+    });
+  }
+
+  /* A press held for 500 ms without moving: the full-screen graph on the
+     sensor, sensors and graph cards. Ten pixels of movement cancel it, so a
+     swipe to the next page or a scroll never turns into one. The click that
+     ends a long-press is swallowed (_longPressed), or it would also open
+     more-info underneath. */
+  _bindLongPress(surface, fn) {
+    let timer = null;
+    let x0 = 0;
+    let y0 = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    surface.addEventListener('pointerdown', (e) => {
+      if (e.button) return;
+      cancel();
+      x0 = e.clientX;
+      y0 = e.clientY;
+      timer = setTimeout(() => {
+        timer = null;
+        this._longAt = Date.now();
+        haptic(this, 'medium');
+        fn();
+      }, 500);
+    });
+    surface.addEventListener('pointermove', (e) => {
+      if (timer && Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) > 10) cancel();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach((t) => surface.addEventListener(t, cancel));
+    surface.addEventListener('contextmenu', (e) => { if (this._longPressed()) e.preventDefault(); });
+  }
+
+  _longPressed() { return !!this._longAt && Date.now() - this._longAt < 800; }
+
+  _openGraph(entity, hours, item) {
+    const s = this._state(entity);
+    const it = item || this._config;
+    graphView().open({
+      entity,
+      title: it.name || (item ? friendly(s, entity) : this._title()),
+      unit: it.unit,
+      decimals: it.decimals,
+      hours: hours || 24,
+      accent: this._accent(),
+      owner: this,
+      hass: this._hass,
     });
   }
 
@@ -1943,7 +1991,7 @@ class NsPanelSensorCard extends NsInfoCard {
   static get defaultOptions() {
     return {
       decimals: null, unit: null, min: null, max: null, bar: null,
-      severity: null, secondary: null,
+      severity: null, secondary: null, long_press: 'graph',
     };
   }
 
@@ -2005,6 +2053,9 @@ class NsPanelSensorCard extends NsInfoCard {
     this._elBadge = this.shadowRoot.querySelector('.badge');
     if (!this._hasBar()) this.shadowRoot.querySelector('.fillwrap').hidden = true;
     this._bindMoreInfo(this._card);
+    if (this._config.long_press !== 'none') {
+      this._bindLongPress(this._card, () => this._openGraph(this._config.entity, 24));
+    }
   }
 
   _render() {
@@ -2067,7 +2118,7 @@ class NsPanelSensorsCard extends NsInfoCard {
   static get cardType() { return 'nspanel-sensors-card'; }
   static get requiresEntity() { return false; }
   static get accent() { return '#7cc4ff'; }
-  static get defaultOptions() { return { entities: [], show_icons: true }; }
+  static get defaultOptions() { return { entities: [], show_icons: true, long_press: 'graph' }; }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -2140,8 +2191,12 @@ class NsPanelSensorsCard extends NsInfoCard {
       cell.innerHTML = (this._config.show_icons ? '<ha-icon></ha-icon>' : '') +
         '<div class="ctext"><div class="cv"></div><div class="cl"></div></div>';
       cell.addEventListener('click', () => {
+        if (this._longPressed()) return;
         if (this._config.more_info && item.entity) moreInfo(this, item.entity);
       });
+      if (item.entity && this._config.long_press !== 'none') {
+        this._bindLongPress(cell, () => this._openGraph(item.entity, 24, item));
+      }
       strip.appendChild(cell);
       return {
         item,
@@ -4320,6 +4375,489 @@ class NsPanelClockCard extends NsInfoCard {
 }
 
 /* ================================================================== *
+ * Graph - a sensor's last hours, from Home Assistant's statistics
+ *
+ * The data is HA's long-term statistics: a mean, a minimum and a maximum per
+ * five minutes (per hour beyond two days), already computed by the recorder.
+ * 24 hours is 288 points and a few kilobytes whatever the sensor does - a
+ * power meter that reports every second costs exactly what a thermometer
+ * does. Raw history would be every single change: tens of thousands of
+ * points for a chatty sensor, which this hardware would spend a visible
+ * moment parsing. A sensor without statistics (no state_class) falls back to
+ * that history, bucketed here into the same five minutes.
+ *
+ * Drawn as one SVG path for the mean and one for the min-max band, in a
+ * viewBox the browser stretches to the card - so nothing is measured, and
+ * the paths are rewritten only when the data or the live value changes. No
+ * animation. Fetched only while the card is on screen, again every five
+ * minutes (the recorder's own cadence); in between, the line's end follows
+ * the live state HA already sends.
+ * ================================================================== */
+
+/* hass.callWS inside HA; the kiosk page's socket has the same shape as
+   HA's connection.sendMessagePromise under the name send(). */
+function wsCall(hass, msg) {
+  if (!hass) return Promise.reject(new Error('no hass'));
+  if (typeof hass.callWS === 'function') return hass.callWS(msg);
+  const c = hass.connection;
+  if (c && typeof c.sendMessagePromise === 'function') return c.sendMessagePromise(msg);
+  if (c && typeof c.send === 'function') return c.send(msg);
+  return Promise.reject(new Error('no websocket'));
+}
+
+const GRAPH_W = 1000;
+const GRAPH_H = 300;
+
+/* {start, end, step, points: [{t, v, lo, hi}], source}. t is the middle of
+   each period, in ms. */
+function fetchSeries(hass, id, hours) {
+  const h = clamp(Number(hours) || 24, 1, 168);
+  const period = h > 48 ? 'hour' : '5minute';
+  const step = period === 'hour' ? 3600e3 : 300e3;
+  const end = Date.now();
+  const start = end - h * 3600e3;
+  const startIso = new Date(start).toISOString();
+  const ms = (x) => (typeof x === 'number' ? (x < 1e12 ? x * 1000 : x) : Date.parse(x));
+  const fin = (x) => typeof x === 'number' && isFinite(x);
+
+  const fromHistory = () => wsCall(hass, {
+    type: 'history/history_during_period',
+    start_time: startIso,
+    entity_ids: [id],
+    minimal_response: true,
+    no_attributes: true,
+    significant_changes_only: false,
+  }).then((res) => {
+    const rows = (res && res[id]) || [];
+    const samples = rows.map((r) => ({
+      t: r.lu != null ? r.lu * 1000 : (r.lc != null ? r.lc * 1000
+        : Date.parse(r.last_updated || r.last_changed)),
+      v: parseFloat(r.s != null ? r.s : r.state),
+    })).filter((s) => isFinite(s.t) && isFinite(s.v)).sort((a, b) => a.t - b.t);
+    const points = [];
+    let i = 0;
+    let last = null;
+    for (let b = Math.floor(start / step) * step; b < end; b += step) {
+      let sum = 0, n = 0, lo = Infinity, hi = -Infinity;
+      while (i < samples.length && samples[i].t < b + step) {
+        const v = samples[i].v;
+        if (samples[i].t >= b) { sum += v; n++; lo = Math.min(lo, v); hi = Math.max(hi, v); }
+        last = v;
+        i++;
+      }
+      // a quiet sensor holds its value: an empty bucket is the last one seen
+      if (n) points.push({ t: b + step / 2, v: sum / n, lo, hi });
+      else if (last !== null) points.push({ t: b + step / 2, v: last, lo: last, hi: last });
+    }
+    return { start, end, step, points, source: 'history' };
+  });
+
+  return wsCall(hass, {
+    type: 'recorder/statistics_during_period',
+    start_time: startIso,
+    statistic_ids: [id],
+    period,
+    types: ['mean', 'min', 'max'],
+  }).then((res) => {
+    const rows = (res && res[id]) || [];
+    const points = rows.filter((r) => fin(r.mean)).map((r) => ({
+      t: ms(r.start) + step / 2,
+      v: r.mean,
+      lo: fin(r.min) ? r.min : r.mean,
+      hi: fin(r.max) ? r.max : r.mean,
+    }));
+    return points.length ? { start, end, step, points, source: 'statistics' } : fromHistory();
+  }, fromHistory);
+}
+
+/* The two path strings for a series over [now - hours, now], plus the range
+   they were scaled to. `live` (a number or null) extends the line to now. */
+function seriesPaths(series, hours, live, band) {
+  const now = Date.now();
+  const t0 = now - clamp(Number(hours) || 24, 1, 168) * 3600e3;
+  const pts = series.points.filter((p) => p.t >= t0);
+  if (!pts.length && live === null) return null;
+  let lo = Infinity, hi = -Infinity;
+  pts.forEach((p) => {
+    lo = Math.min(lo, band ? p.lo : p.v);
+    hi = Math.max(hi, band ? p.hi : p.v);
+  });
+  if (live !== null) { lo = Math.min(lo, live); hi = Math.max(hi, live); }
+  const span = hi - lo || Math.max(Math.abs(hi) * 0.1, 1);
+  const top = hi + span * 0.08;
+  const bottom = lo - span * 0.08;
+  const x = (t) => (((t - t0) / (now - t0)) * GRAPH_W).toFixed(1);
+  const y = (v) => (GRAPH_H - ((v - bottom) / (top - bottom)) * GRAPH_H).toFixed(1);
+  const line = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.v));
+  if (live !== null) line.push((line.length ? 'L' : 'M') + GRAPH_W + ',' + y(live));
+  let area = '';
+  if (band && pts.length > 1) {
+    area = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.hi)).join('') +
+      pts.slice().reverse().map((p) => 'L' + x(p.t) + ',' + y(p.lo)).join('') + 'Z';
+  }
+  return { line: line.join(''), area, lo, hi };
+}
+
+const GRAPH_SVG = `<svg viewBox="0 0 ${GRAPH_W} ${GRAPH_H}" preserveAspectRatio="none">
+  <path class="gband" d=""></path><path class="gline" d=""></path></svg>`;
+
+const GRAPH_CSS = `
+.ghead {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.gval {
+  font-size: 40px; font-weight: 700; line-height: 1; letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.gval small { font-size: 20px; font-weight: 600; opacity: .65; margin-left: 2px; }
+.gname {
+  margin-top: 4px; font-size: 13px; color: var(--ns-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.grange {
+  flex: none; text-align: right; font-size: 13px; line-height: 18px;
+  color: var(--ns-muted); font-variant-numeric: tabular-nums;
+}
+.gwrap {
+  position: absolute; left: 0; right: 0; bottom: 0; top: var(--ns-gtop, 84px);
+  pointer-events: none;
+}
+.gwrap svg { display: block; width: 100%; height: 100%; }
+.gline {
+  fill: none; stroke: var(--ns-accent); stroke-width: 2.5;
+  vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round;
+}
+.gband { fill: var(--ns-accent); opacity: .16; }
+.gempty {
+  position: absolute; left: 0; right: 0; bottom: 0; top: var(--ns-gtop, 84px);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: var(--ns-muted); pointer-events: none;
+}
+`;
+
+/* The full-screen graph a long-press opens: the same drawing, bigger, with
+   6 h / 24 h / 3 d / 7 d to choose from. A singleton like the control sheet,
+   mounted on sheetHost or document.body; the X or the scrim closes it. It
+   asks HA for data when it opens and when the range changes, and follows the
+   live state while open through the card that opened it. */
+const GRAPH_VIEW_CSS = `
+:host {
+  position: fixed; inset: 0; z-index: 10000; display: block; overflow: hidden;
+  font-family: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #f2f4f7; --ns-accent: #7cc4ff; --ns-muted: #98a1b0;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+.scrim {
+  position: absolute; inset: 0; background: #0b0d10; opacity: 0;
+  transition: opacity .16s linear;
+}
+.panel {
+  position: absolute; inset: 12px; padding: 18px 18px 14px;
+  display: flex; flex-direction: column; gap: 12px;
+  background: #16191f; border-radius: 24px;
+  opacity: 0; transform: translateY(16px);
+  transition: opacity .16s linear, transform .16s ease-out;
+}
+:host(.in) .scrim { opacity: .82; }
+:host(.in) .panel { opacity: 1; transform: none; }
+.top { display: flex; align-items: flex-start; gap: 12px; }
+.ttl { flex: 1; min-width: 0; }
+.tname { font-size: 18px; font-weight: 600; color: var(--ns-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tval { margin-top: 4px; font-size: 44px; font-weight: 700; line-height: 1;
+  letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.tval small { font-size: 22px; font-weight: 600; opacity: .65; margin-left: 2px; }
+.trange { margin-top: 6px; font-size: 14px; color: var(--ns-muted); font-variant-numeric: tabular-nums; }
+.x {
+  width: 56px; height: 56px; flex: none; border: 0; border-radius: 16px;
+  background: rgba(255,255,255,.10); color: #f2f4f7; font-size: 30px; line-height: 56px;
+}
+.plot { position: relative; flex: 1; min-height: 0; border-radius: 14px;
+  background: rgba(255,255,255,.03); overflow: hidden; }
+.plot svg { display: block; width: 100%; height: 100%; }
+.gline { fill: none; stroke: var(--ns-accent); stroke-width: 3;
+  vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.gband { fill: var(--ns-accent); opacity: .16; }
+.empty { position: absolute; inset: 0; display: flex; align-items: center;
+  justify-content: center; color: var(--ns-muted); font-size: 15px; }
+.axis { display: flex; justify-content: space-between; font-size: 13px;
+  color: var(--ns-muted); font-variant-numeric: tabular-nums; }
+.ranges { display: flex; gap: 10px; }
+.r {
+  flex: 1; height: 52px; border: 0; border-radius: 14px; font-size: 17px; font-weight: 600;
+  background: rgba(255,255,255,.08); color: #f2f4f7;
+}
+.r.on { background: var(--ns-accent); color: #0b0d10; }
+`;
+
+const GRAPH_RANGES = [[6, '6 h'], [24, '24 h'], [72, '3 d'], [168, '7 d']];
+
+function graphLabel(hours) {
+  const r = GRAPH_RANGES.find((x) => x[0] === hours);
+  if (r) return r[1];
+  return hours % 24 === 0 ? (hours / 24) + ' d' : hours + ' h';
+}
+
+class NsGraphView extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = `
+      <style>${GRAPH_VIEW_CSS}</style>
+      <div class="scrim"></div>
+      <div class="panel">
+        <div class="top">
+          <div class="ttl"><div class="tname"></div><div class="tval"></div><div class="trange"></div></div>
+          <button class="x" aria-label="Close">×</button>
+        </div>
+        <div class="plot">${GRAPH_SVG}<div class="empty" hidden></div></div>
+        <div class="axis"><span class="from"></span><span class="span"></span><span>now</span></div>
+        <div class="ranges">${GRAPH_RANGES.map((r) =>
+          `<button class="r" data-h="${r[0]}">${r[1]}</button>`).join('')}</div>
+      </div>`;
+    const q = (s) => root.querySelector(s);
+    this._name = q('.tname');
+    this._val = q('.tval');
+    this._range = q('.trange');
+    this._line = q('.gline');
+    this._band = q('.gband');
+    this._empty = q('.empty');
+    this._from = q('.from');
+    this._span = q('.span');
+    this._btns = Array.from(root.querySelectorAll('.r'));
+    q('.x').addEventListener('click', () => this.close());
+    q('.scrim').addEventListener('click', () => this.close());
+    this._btns.forEach((b) => b.addEventListener('click', () => {
+      haptic(this, 'light');
+      this._setHours(Number(b.dataset.h));
+    }));
+  }
+
+  ownedBy(card) { return this._owner === card; }
+
+  /* opts: {entity, title, unit, decimals, hours, accent, owner, hass} */
+  open(opts) {
+    this._opts = opts;
+    this._owner = opts.owner || null;
+    this._hass = opts.hass;
+    this._series = null;
+    this._stamp = null;
+    this.style.setProperty('--ns-accent', opts.accent || '#7cc4ff');
+    this._name.textContent = opts.title || opts.entity;
+    const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
+    if (this.parentNode !== host) host.appendChild(this);
+    requestAnimationFrame(() => this.classList.add('in'));
+    this._setHours(GRAPH_RANGES.some((r) => r[0] === opts.hours) ? opts.hours : 24);
+  }
+
+  set hass(hass) {
+    const prev = this._hass;
+    this._hass = hass;
+    if (!this._opts || (prev && prev.states[this._opts.entity] === hass.states[this._opts.entity])) return;
+    this._render();
+  }
+
+  _setHours(h) {
+    this._hours = h;
+    this._btns.forEach((b) => b.classList.toggle('on', Number(b.dataset.h) === h));
+    this._span.textContent = '−' + graphLabel(h / 2);
+    this._from.textContent = '−' + graphLabel(h);
+    this._series = null;
+    this._empty.hidden = false;
+    this._empty.textContent = 'Loading…';
+    this._line.setAttribute('d', '');
+    this._band.setAttribute('d', '');
+    this._range.textContent = '';
+    this._ask = (this._ask || 0) + 1;
+    const ask = this._ask;
+    fetchSeries(this._hass, this._opts.entity, h).then((s) => {
+      if (ask !== this._ask || !this.isConnected) return;
+      this._series = s;
+      this._stamp = null;
+      this._render();
+    }, () => {
+      if (ask !== this._ask) return;
+      this._empty.textContent = 'Home Assistant has no history for this';
+    });
+    this._render();
+  }
+
+  _render() {
+    const o = this._opts;
+    const s = this._hass && this._hass.states[o.entity];
+    const n = numeric(s);
+    const unit = o.unit == null ? unitOf(s) : o.unit;
+    const text = isBroken(s) ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, o.decimals));
+    this._val.innerHTML = unit && n !== null ? `${text}<small>${unit}</small>` : text;
+    if (!this._series) return;
+    const stamp = this._series.end + '|' + n;
+    if (stamp === this._stamp) return;
+    this._stamp = stamp;
+    const p = seriesPaths(this._series, this._hours, n, true);
+    this._empty.hidden = !!p;
+    if (!p) { this._empty.textContent = 'Home Assistant has no history for this'; return; }
+    this._line.setAttribute('d', p.line);
+    this._band.setAttribute('d', p.area);
+    this._range.textContent = '↑ ' + fmt(p.hi, o.decimals) + '   ↓ ' + fmt(p.lo, o.decimals);
+  }
+
+  close() {
+    this._owner = null;
+    this._ask = (this._ask || 0) + 1;
+    this.classList.remove('in');
+    setTimeout(() => { if (this.parentNode && !this.classList.contains('in')) this.remove(); }, 200);
+  }
+}
+customElements.define('ns-graph-view', NsGraphView);
+
+let _graphView = null;
+function graphView() {
+  if (!_graphView) _graphView = document.createElement('ns-graph-view');
+  return _graphView;
+}
+
+class NsPanelGraphCard extends NsInfoCard {
+  static get cardType() { return 'nspanel-graph-card'; }
+  static get extraCss() { return GRAPH_CSS; }
+  static get accent() { return '#7cc4ff'; }
+  static get defaultOptions() {
+    return { hours: 24, show_minmax: true, unit: null, decimals: null, long_press: 'graph' };
+  }
+
+  static getStubConfig(hass) {
+    const ids = hass && hass.states ? Object.keys(hass.states) : [];
+    const found = ids.find((e) => e.indexOf('sensor.') === 0 &&
+      /°C|°F|W$|kW$/.test(String((hass.states[e].attributes || {}).unit_of_measurement || '')));
+    return { entity: found || 'sensor.example', height: 200 };
+  }
+
+  get _hours() { return clamp(Number(this._config.hours) || 24, 1, 168); }
+
+  _build() {
+    if (this._built || !this._config) return;
+    this._built = true;
+    this.shadowRoot.innerHTML = `
+      ${this._shell()}
+        <div class="gwrap">${GRAPH_SVG}</div>
+        <div class="gempty" hidden></div>
+        <div class="content">
+          <div class="ghead">
+            <div style="min-width:0"><div class="gval"></div><div class="gname"></div></div>
+            <div class="grange"><div class="ghi"></div><div class="glo"></div><div class="gspan"></div></div>
+          </div>
+        </div>
+      </div>
+    `;
+    const q = (s) => this.shadowRoot.querySelector(s);
+    this._card = q('.card');
+    this._elVal = q('.gval');
+    this._elName = q('.gname');
+    this._elHi = q('.ghi');
+    this._elLo = q('.glo');
+    this._elEmpty = q('.gempty');
+    this._line = q('.gline');
+    this._band = q('.gband');
+    q('.gspan').textContent = graphLabel(this._hours);
+    this._bindMoreInfo(this._card);
+    if (this._config.long_press !== 'none') {
+      this._bindLongPress(this._card, () => this._openGraph(this._config.entity, this._hours));
+    }
+    this._watch();
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._watch();
+  }
+
+  _teardown() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (this._io) { this._io.disconnect(); this._io = null; }
+    this._visible = false;
+  }
+
+  /* As the camera card: data is asked for only while the card is on screen. */
+  _watch() {
+    if (this._io || !this._built || !this.isConnected) return;
+    if (typeof IntersectionObserver === 'undefined') { this._visible = true; this._fetch(); return; }
+    this._io = new IntersectionObserver((entries) => {
+      const now = entries[entries.length - 1].isIntersecting;
+      if (now === this._visible) return;
+      this._visible = now;
+      if (now) this._fetch();
+      else if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    }, { threshold: 0.1 });
+    this._io.observe(this);
+  }
+
+  _fetch() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (!this._visible || !this.isConnected) return;
+    // a card that comes back on screen within five minutes keeps what it has
+    const fresh = this._series && Date.now() - this._series.end < 300e3;
+    const again = () => {
+      if (this._visible && this.isConnected) this._timer = setTimeout(() => this._fetch(), 300e3);
+    };
+    if (fresh || !this._hass) {
+      if (!this._hass) this._timer = setTimeout(() => this._fetch(), 1000);
+      else this._timer = setTimeout(() => this._fetch(), 300e3 - (Date.now() - this._series.end));
+      return;
+    }
+    fetchSeries(this._hass, this._config.entity, this._hours).then((s) => {
+      this._series = s;
+      this._pathStamp = null;
+      this._failed = false;
+      this._scheduleRender();
+      again();
+    }, () => {
+      this._failed = true;
+      this._scheduleRender();
+      again();
+    });
+  }
+
+  _render() {
+    if (!this._card) return;
+    const cfg = this._config;
+    const s = this._stateObj;
+    const broken = isBroken(s);
+    const n = numeric(s);
+    const unit = cfg.unit == null ? unitOf(s) : cfg.unit;
+    const text = broken ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, cfg.decimals));
+    const shown = text + '|' + unit;
+    if (shown !== this._valShown) {
+      this._valShown = shown;
+      this._elVal.innerHTML = unit && !broken && n !== null ? `${text}<small>${unit}</small>` : text;
+    }
+    this._elName.textContent = this._title();
+
+    if (!this._series) {
+      this._elEmpty.hidden = !this._failed;
+      this._elEmpty.textContent = 'No history from Home Assistant';
+      return;
+    }
+    const stamp = this._series.end + '|' + n;
+    if (stamp === this._pathStamp) return;
+    this._pathStamp = stamp;
+    const p = seriesPaths(this._series, this._hours, broken ? null : n, cfg.show_minmax !== false);
+    this._elEmpty.hidden = !!p;
+    if (!p) {
+      this._elEmpty.textContent = 'No history from Home Assistant';
+      this._line.setAttribute('d', '');
+      this._band.setAttribute('d', '');
+      this._elHi.textContent = '';
+      this._elLo.textContent = '';
+      return;
+    }
+    this._line.setAttribute('d', p.line);
+    this._band.setAttribute('d', p.area);
+    this._elHi.textContent = '↑ ' + fmt(p.hi, cfg.decimals);
+    this._elLo.textContent = '↓ ' + fmt(p.lo, cfg.decimals);
+  }
+}
+
+/* ================================================================== *
  * Probe - what is this panel actually running?
  *
  * Drop it on a dashboard once, read the numbers off the glass, delete it.
@@ -4530,6 +5068,8 @@ const EDITOR_LABELS = {
   max: 'Range maximum',
   bar: 'Show the level as a bar',
   show_icons: 'Show icons',
+  hours: 'Hours shown (1-168)',
+  show_minmax: 'Show the min-max band',
   only_problems: 'Only show what is wrong',
   columns: 'Columns',
   all_clear: 'All-clear text',
@@ -4748,6 +5288,15 @@ const INFO_SCHEMA = [
   { name: 'more_info', selector: { boolean: {} } },
 ];
 
+/* The information cards' long-press: the full-screen graph, or nothing. */
+const GRAPH_LONG_PRESS = {
+  name: 'long_press',
+  selector: { select: { mode: 'dropdown', options: [
+    { value: 'graph', label: 'Graph of the last hours' },
+    { value: 'none', label: 'Nothing' },
+  ] } },
+};
+
 const SENSOR_SCHEMA = INFO_SCHEMA.concat([
   { name: 'secondary', selector: { entity: {} } },
   {
@@ -4765,6 +5314,19 @@ const SENSOR_SCHEMA = INFO_SCHEMA.concat([
       color: { required: true, selector: { text: {} } },
     }, 'color', 'above'),
   },
+  GRAPH_LONG_PRESS,
+]);
+
+const GRAPH_SCHEMA = INFO_SCHEMA.concat([
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'hours', selector: { number: { min: 1, max: 168, step: 1, mode: 'box' } } },
+      { name: 'show_minmax', selector: { boolean: {} } },
+      { name: 'unit', selector: { text: {} } },
+      { name: 'decimals', selector: { number: { min: 0, max: 4, step: 1, mode: 'box' } } },
+    ],
+  },
+  GRAPH_LONG_PRESS,
 ]);
 
 const SENSORS_SCHEMA = INFO_SCHEMA.concat([
@@ -4782,6 +5344,7 @@ const SENSORS_SCHEMA = INFO_SCHEMA.concat([
     }, 'name', 'entity'),
   },
   { name: 'show_icons', selector: { boolean: {} } },
+  GRAPH_LONG_PRESS,
 ]);
 
 const STATUS_SCHEMA = INFO_SCHEMA.concat([
@@ -5123,6 +5686,12 @@ class NsPanelSensorCardEditor extends NsBaseCardEditor {
   static get cardType() { return 'nspanel-sensor-card'; }
   static get rows() { return SENSOR_SCHEMA; }
   static get note() { return 'Severity colours: the last one whose "above" the value passes wins.'; }
+}
+
+class NsPanelGraphCardEditor extends NsBaseCardEditor {
+  static get cardType() { return 'nspanel-graph-card'; }
+  static get rows() { return GRAPH_SCHEMA; }
+  static get note() { return 'From Home Assistant\'s statistics: works for any sensor with a state class.'; }
 }
 
 class NsPanelSensorsCardEditor extends NsBaseCardEditor {
@@ -5524,6 +6093,7 @@ customElements.define('nspanel-weather-card', NsPanelWeatherCard);
 customElements.define('nspanel-clock-card', NsPanelClockCard);
 customElements.define('nspanel-swipe-card', NsPanelSwipeCard);
 customElements.define('nspanel-camera-card', NsPanelCameraCard);
+customElements.define('nspanel-graph-card', NsPanelGraphCard);
 customElements.define('nspanel-screensaver', NsPanelScreensaverCard);
 
 customElements.define('nspanel-light-card-editor', NsPanelLightCardEditor);
@@ -5540,6 +6110,7 @@ customElements.define('nspanel-sensors-card-editor', NsPanelSensorsCardEditor);
 customElements.define('nspanel-status-card-editor', NsPanelStatusCardEditor);
 customElements.define('nspanel-weather-card-editor', NsPanelWeatherCardEditor);
 customElements.define('nspanel-clock-card-editor', NsPanelClockCardEditor);
+customElements.define('nspanel-graph-card-editor', NsPanelGraphCardEditor);
 
 window.customCards = window.customCards || [];
 window.customCards.push(
@@ -5628,6 +6199,12 @@ window.customCards.push(
     preview: true,
   },
   {
+    type: 'nspanel-graph-card',
+    name: 'NSPanel Graph',
+    description: 'A sensor\'s last hours from Home Assistant\'s statistics: mean line, min-max band.',
+    preview: true,
+  },
+  {
     type: 'nspanel-screensaver',
     name: 'NSPanel Screensaver',
     description: 'Configures the native NSPanel app\'s screensaver. Renders nothing in a browser.',
@@ -5662,6 +6239,7 @@ window.NsPanelCards = {
   NsPanelStatusCard,
   NsPanelWeatherCard,
   NsPanelClockCard,
+  NsPanelGraphCard,
   NsInfoCard,
   NsPanelLightCardEditor,
   NsPanelCoverCardEditor,
@@ -5677,5 +6255,6 @@ window.NsPanelCards = {
   NsPanelStatusCardEditor,
   NsPanelWeatherCardEditor,
   NsPanelClockCardEditor,
+  NsPanelGraphCardEditor,
   NsSheet,
 };
