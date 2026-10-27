@@ -115,7 +115,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.23.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.24.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -877,7 +877,23 @@ entities:
 ```
 
 Two to four entities; a fifth is ignored rather than squeezed in. An entry is either a bare
-`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`. Each reading is its
+`sensor.x` or a map taking `entity`, `name`, `icon`, `unit` and `decimals`.
+
+An entry can also be the time, on the panel's own clock rather than an entity such as
+`sensor.time` (which only changes when Home Assistant gets round to sending it):
+
+```yaml
+entities:
+  - entity: sensor.outside_temp
+    name: Outside
+  - entity: sensor.inside_temp
+    name: Inside
+  - clock: true          # name defaults to "Time", icon to mdi:clock-outline
+    hour_24: true        # default; false gives 3:05 pm
+    show_seconds: false  # default
+```
+
+It updates on the minute (on the second with `show_seconds`), and a tap on it does nothing. Each reading is its
 icon with the number and name beside it, no box around it. The numbers are 40px, the size of
 the control cards'; three or four readings with icons do not fit a Pro 86 across, and
 `show_icons: false` drops the icons and gives the numbers the room.

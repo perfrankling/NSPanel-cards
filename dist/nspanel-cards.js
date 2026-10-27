@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.23.0';
+const NSPANEL_VERSION = '0.24.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -2083,16 +2083,45 @@ class NsPanelSensorsCard extends NsInfoCard {
     }
   }
 
-  /* Each item is either "sensor.x" or {entity, name, icon, unit, decimals}. */
+  /* Each item is either "sensor.x" or {entity, name, icon, unit, decimals} -
+     or {clock: true, name, icon, hour_24, show_seconds}: the time on this
+     panel's own clock, as the clock card shows it, rather than a sensor.time
+     that only moves when HA gets round to telling the panel. */
   get _items() {
     const list = Array.isArray(this._config.entities) ? this._config.entities : [];
     return list
       .map((it) => (typeof it === 'string' ? { entity: it } : it))
-      .filter((it) => it && it.entity)
+      .filter((it) => it && (it.entity || it.clock === true))
       .slice(0, 4);
   }
 
-  _entityIds() { return this._items.map((i) => i.entity); }
+  _entityIds() { return this._items.filter((i) => !i.clock).map((i) => i.entity); }
+
+  connectedCallback() {
+    super.connectedCallback();
+    this._startTimer();
+  }
+
+  _teardown() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+  }
+
+  /* Only with a clock item: re-armed each tick against the wall clock, as the
+     clock card's is, every minute - or every second when an item shows them.
+     A tick renders the strip; the sensors in it are diffed text, so the cost
+     is one textContent a minute. */
+  _startTimer() {
+    this._teardown();
+    if (!this.isConnected || !this._config) return;
+    const clocks = this._items.filter((i) => i.clock);
+    if (!clocks.length) return;
+    const period = clocks.some((i) => i.show_seconds) ? 1000 : 60000;
+    const tick = () => {
+      this._scheduleRender();
+      this._timer = setTimeout(tick, period - (Date.now() % period) + 20);
+    };
+    tick();
+  }
 
   _build() {
     if (this._built || !this._config) return;
@@ -2111,7 +2140,7 @@ class NsPanelSensorsCard extends NsInfoCard {
       cell.innerHTML = (this._config.show_icons ? '<ha-icon></ha-icon>' : '') +
         '<div class="ctext"><div class="cv"></div><div class="cl"></div></div>';
       cell.addEventListener('click', () => {
-        if (this._config.more_info) moreInfo(this, item.entity);
+        if (this._config.more_info && item.entity) moreInfo(this, item.entity);
       });
       strip.appendChild(cell);
       return {
@@ -2121,11 +2150,31 @@ class NsPanelSensorsCard extends NsInfoCard {
         label: cell.querySelector('.cl'),
       };
     });
+    this._startTimer();
+  }
+
+  _renderClock(c) {
+    const it = c.item;
+    const now = new Date();
+    const h24 = it.hour_24 !== false;
+    let h = now.getHours();
+    let suffix = '';
+    if (!h24) {
+      suffix = h < 12 ? 'am' : 'pm';
+      h = h % 12 || 12;
+    }
+    const text = (h24 ? String(h).padStart(2, '0') : String(h)) + ':' +
+      String(now.getMinutes()).padStart(2, '0') +
+      (it.show_seconds ? ':' + String(now.getSeconds()).padStart(2, '0') : '');
+    c.value.innerHTML = suffix ? `${text}<small>${suffix}</small>` : text;
+    c.label.textContent = it.name != null ? it.name : 'Time';
+    if (c.icon) c.icon.setAttribute('icon', it.icon || 'mdi:clock-outline');
   }
 
   _render() {
     if (!this._cells) return;
     this._cells.forEach((c) => {
+      if (c.item.clock) { this._renderClock(c); return; }
       const s = this._state(c.item.entity);
       const broken = isBroken(s);
       const n = numeric(s);
@@ -4720,12 +4769,17 @@ const SENSOR_SCHEMA = INFO_SCHEMA.concat([
 
 const SENSORS_SCHEMA = INFO_SCHEMA.concat([
   {
-    name: 'entities', selector: listOf(Object.assign({}, ENTITY_FIELD, {
+    // entity is not required here: an item may be the panel's clock instead
+    name: 'entities', selector: listOf({
+      entity: { selector: { entity: {} } },
+      clock: { label: 'Show local time', selector: { boolean: {} } },
       name: { selector: { text: {} } },
       icon: { selector: { icon: {} } },
       unit: { selector: { text: {} } },
       decimals: { selector: { number: { min: 0, max: 4, step: 1, mode: 'box' } } },
-    }), 'name', 'entity'),
+      hour_24: { selector: { boolean: {} } },
+      show_seconds: { selector: { boolean: {} } },
+    }, 'name', 'entity'),
   },
   { name: 'show_icons', selector: { boolean: {} } },
 ]);
