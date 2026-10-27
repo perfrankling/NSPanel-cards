@@ -116,7 +116,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.25.2`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.26.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -914,6 +914,26 @@ maximum as a band behind it. Gridlines run at round values (labelled) and round 
 3 hours over a day, hourly over 6 hours, noon and midnight over 3 days, midnights over a week;
 the full-screen graph labels the times too.
 
+**Several sensors.** `entities` puts up to four on one graph, sharing its scale and
+gridlines - so give them the same unit, two temperatures or two power meters:
+
+```yaml
+type: custom:nspanel-graph-card
+title: Temperatures
+entities:
+  - entity: sensor.outside_temp
+    name: Outside
+  - entity: sensor.inside_temp
+    name: Inside
+    color: '#f0a03c'     # optional
+```
+
+The first line takes the card's `accent`, the next ones amber, green and violet, unless an
+entry names its own `color`. The top of the card then shows each current value with its name in
+its line's colour, and the min-max band is off unless `show_minmax: true` (behind several lines
+the bands only overlap). One statistics request fetches them all; a sensor without statistics
+falls back to its own history without holding up the others.
+
 The data is Home Assistant's **statistics**, which the recorder already keeps for every sensor
 with a `state_class` (temperature, humidity, power and most others). That is a few hundred
 points whatever the sensor does - a power meter reporting every second costs what a
@@ -925,9 +945,10 @@ minutes; in between, the end of the line follows the live value. It is never ani
 
 | Option | Default | |
 | --- | --- | --- |
-| `entity` | — | required; any sensor with a number for a state |
+| `entity` | — | one sensor, with a number for a state |
+| `entities` | — | instead of `entity`: up to four, each `sensor.x` or `{entity, name, color}` |
 | `hours` | `24` | how far back, 1–168 |
-| `show_minmax` | `true` | the min-to-max band behind the line |
+| `show_minmax` | one sensor: on, several: off | the min-to-max band behind each line |
 | `unit` | the entity's | |
 | `decimals` | automatic | for the value and the high/low |
 | `long_press` | `graph` | or `none` |

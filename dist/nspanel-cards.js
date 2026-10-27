@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.25.2';
+const NSPANEL_VERSION = '0.26.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1948,15 +1948,13 @@ class NsInfoCard extends HTMLElement {
 
   _longPressed() { return !!this._longAt && Date.now() - this._longAt < 800; }
 
-  _openGraph(entity, hours, item) {
-    const s = this._state(entity);
-    const it = item || this._config;
+  /* items: [{entity, name, unit, decimals, color}] */
+  _openGraph(items, hours, title, band) {
     graphView().open({
-      entity,
-      title: it.name || (item ? friendly(s, entity) : this._title()),
-      unit: it.unit,
-      decimals: it.decimals,
+      items,
+      title: title || (items.length === 1 ? items[0].name : ''),
       hours: hours || 24,
+      band,
       accent: this._accent(),
       owner: this,
       hass: this._hass,
@@ -2054,7 +2052,10 @@ class NsPanelSensorCard extends NsInfoCard {
     if (!this._hasBar()) this.shadowRoot.querySelector('.fillwrap').hidden = true;
     this._bindMoreInfo(this._card);
     if (this._config.long_press !== 'none') {
-      this._bindLongPress(this._card, () => this._openGraph(this._config.entity, 24));
+      this._bindLongPress(this._card, () => this._openGraph([{
+        entity: this._config.entity, name: this._title(),
+        unit: this._config.unit, decimals: this._config.decimals,
+      }], 24));
     }
   }
 
@@ -2195,7 +2196,9 @@ class NsPanelSensorsCard extends NsInfoCard {
         if (this._config.more_info && item.entity) moreInfo(this, item.entity);
       });
       if (item.entity && this._config.long_press !== 'none') {
-        this._bindLongPress(cell, () => this._openGraph(item.entity, 24, item));
+        this._bindLongPress(cell, () => this._openGraph([Object.assign({}, item, {
+          name: item.name || friendly(this._state(item.entity), item.entity),
+        })], 24));
       }
       strip.appendChild(cell);
       return {
@@ -4408,9 +4411,13 @@ function wsCall(hass, msg) {
 const GRAPH_W = 1000;
 const GRAPH_H = 300;
 
-/* {start, end, step, points: [{t, v, lo, hi}], source}. t is the middle of
-   each period, in ms. */
-function fetchSeries(hass, id, hours) {
+/* {start, end, step, byId: {id: [{t, v, lo, hi}]}}. t is the middle of each
+   period, in ms. One statistics request for every sensor (it takes a list);
+   a sensor it has nothing for - no state_class - comes from its recorded
+   history instead, bucketed here into the same periods, without holding up
+   the others. */
+function fetchSeries(hass, ids, hours) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   const h = clamp(Number(hours) || 24, 1, 168);
   const period = h > 48 ? 'hour' : '5minute';
   const step = period === 'hour' ? 3600e3 : 300e3;
@@ -4419,21 +4426,14 @@ function fetchSeries(hass, id, hours) {
   const startIso = new Date(start).toISOString();
   const ms = (x) => (typeof x === 'number' ? (x < 1e12 ? x * 1000 : x) : Date.parse(x));
   const fin = (x) => typeof x === 'number' && isFinite(x);
+  const byId = {};
 
-  const fromHistory = () => wsCall(hass, {
-    type: 'history/history_during_period',
-    start_time: startIso,
-    entity_ids: [id],
-    minimal_response: true,
-    no_attributes: true,
-    significant_changes_only: false,
-  }).then((res) => {
-    const rows = (res && res[id]) || [];
+  const bucket = (rows) => {
     const samples = rows.map((r) => ({
       t: r.lu != null ? r.lu * 1000 : (r.lc != null ? r.lc * 1000
         : Date.parse(r.last_updated || r.last_changed)),
       v: parseFloat(r.s != null ? r.s : r.state),
-    })).filter((s) => isFinite(s.t) && isFinite(s.v)).sort((a, b) => a.t - b.t);
+    })).filter((x) => isFinite(x.t) && isFinite(x.v)).sort((a, b) => a.t - b.t);
     const points = [];
     let i = 0;
     let last = null;
@@ -4449,34 +4449,58 @@ function fetchSeries(hass, id, hours) {
       if (n) points.push({ t: b + step / 2, v: sum / n, lo, hi });
       else if (last !== null) points.push({ t: b + step / 2, v: last, lo: last, hi: last });
     }
-    return { start, end, step, points, source: 'history' };
-  });
+    return points;
+  };
+
+  const fromHistory = (missing) => (!missing.length ? Promise.resolve() : wsCall(hass, {
+    type: 'history/history_during_period',
+    start_time: startIso,
+    entity_ids: missing,
+    minimal_response: true,
+    no_attributes: true,
+    significant_changes_only: false,
+  }).then((res) => {
+    missing.forEach((id) => { byId[id] = bucket((res && res[id]) || []); });
+  }));
+
+  const done = () => ({ start, end, step, byId });
 
   return wsCall(hass, {
     type: 'recorder/statistics_during_period',
     start_time: startIso,
-    statistic_ids: [id],
+    statistic_ids: list,
     period,
     types: ['mean', 'min', 'max'],
   }).then((res) => {
-    const rows = (res && res[id]) || [];
-    const points = rows.filter((r) => fin(r.mean)).map((r) => ({
-      t: ms(r.start) + step / 2,
-      v: r.mean,
-      lo: fin(r.min) ? r.min : r.mean,
-      hi: fin(r.max) ? r.max : r.mean,
-    }));
-    return points.length ? { start, end, step, points, source: 'statistics' } : fromHistory();
-  }, fromHistory);
+    list.forEach((id) => {
+      byId[id] = ((res && res[id]) || []).filter((r) => fin(r.mean)).map((r) => ({
+        t: ms(r.start) + step / 2,
+        v: r.mean,
+        lo: fin(r.min) ? r.min : r.mean,
+        hi: fin(r.max) ? r.max : r.mean,
+      }));
+    });
+    return fromHistory(list.filter((id) => !byId[id].length));
+  }, () => fromHistory(list)).then(done);
 }
 
-/* A round step that cuts `range` into about `n` parts: 1, 2, 2.5 or 5 times a
-   power of ten, the way HA's own graphs and every chart library pick them. */
+/* The lines' colours: the first is the card's accent, then amber, green and
+   violet - unless an item names its own. */
+const GRAPH_COLOURS = ['#f0a03c', '#8ddba4', '#a78bfa'];
+function graphColour(item, i, accent) {
+  return (item && item.color) || (i === 0 ? accent : GRAPH_COLOURS[(i - 1) % GRAPH_COLOURS.length]);
+}
+
+/* A round step that cuts `range` into about `n` parts: 1, 2 or 5 times a
+   power of ten, whichever comes closest. Not 2.5 - its lines land on 12.5 and
+   17.5, which read worse than a line every 2. */
 function niceStep(range, n) {
-  const raw = range / n;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const f = raw / mag;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+  const mag = Math.pow(10, Math.floor(Math.log10(range / n)));
+  let best = mag;
+  [1, 2, 5, 10].forEach((k) => {
+    if (Math.abs(range / (k * mag) - n) < Math.abs(range / best - n)) best = k * mag;
+  });
+  return best;
 }
 
 const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -4502,37 +4526,46 @@ function timeTicks(t0, t1, hours) {
   return out;
 }
 
-/* The paths for a series over [now - hours, now], the grid behind it and the
-   ticks to label it with. The value range snaps outwards to round grid lines,
-   so the top and bottom of the graph are always labelled values. `live` (a
-   number or null) extends the line to now. */
-function seriesPaths(series, hours, live, band, parts) {
+/* The paths for every line over [now - hours, now], the grid behind them and
+   the ticks to label it with. `lines` is [{id, live}]: live (a number or
+   null) extends that line to now. All lines share one scale, which snaps
+   outwards to round grid lines, so the top and bottom of the graph are
+   always labelled values. */
+function seriesPaths(series, hours, lines, band, parts) {
   const now = Date.now();
   const t0 = now - clamp(Number(hours) || 24, 1, 168) * 3600e3;
-  const pts = series.points.filter((p) => p.t >= t0);
-  if (!pts.length && live === null) return null;
+  const sets = lines.map((l) => ({
+    live: l.live,
+    pts: ((series.byId || {})[l.id] || []).filter((p) => p.t >= t0),
+  }));
   let lo = Infinity, hi = -Infinity;
-  pts.forEach((p) => {
-    lo = Math.min(lo, band ? p.lo : p.v);
-    hi = Math.max(hi, band ? p.hi : p.v);
+  sets.forEach((d) => {
+    d.pts.forEach((p) => {
+      lo = Math.min(lo, band ? p.lo : p.v);
+      hi = Math.max(hi, band ? p.hi : p.v);
+    });
+    if (d.live !== null) { lo = Math.min(lo, d.live); hi = Math.max(hi, d.live); }
   });
-  if (live !== null) { lo = Math.min(lo, live); hi = Math.max(hi, live); }
+  if (lo === Infinity) return null;
   // about six bands between lines: 7-12 degrees gets a line every degree
   const step = niceStep(hi - lo || Math.max(Math.abs(hi) * 0.1, 1), parts || 6);
-  let bottom = Math.floor(lo / step) * step;
+  const bottom = Math.floor(lo / step) * step;
   let top = Math.ceil(hi / step) * step;
   if (top - bottom < step) top = bottom + step;
   const x = (t) => (((t - t0) / (now - t0)) * GRAPH_W).toFixed(1);
   const y = (v) => (GRAPH_H - ((v - bottom) / (top - bottom)) * GRAPH_H).toFixed(1);
-  const line = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.v));
-  if (live !== null) line.push((line.length ? 'L' : 'M') + GRAPH_W + ',' + y(live));
-  let area = '';
-  if (band && pts.length > 1) {
-    area = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.hi)).join('') +
-      pts.slice().reverse().map((p) => 'L' + x(p.t) + ',' + y(p.lo)).join('') + 'Z';
-  }
+  const paths = sets.map((d) => {
+    const line = d.pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.v));
+    if (d.live !== null) line.push((line.length ? 'L' : 'M') + GRAPH_W + ',' + y(d.live));
+    let area = '';
+    if (band && d.pts.length > 1) {
+      area = d.pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.hi)).join('') +
+        d.pts.slice().reverse().map((p) => 'L' + x(p.t) + ',' + y(p.lo)).join('') + 'Z';
+    }
+    return { line: line.join(''), area };
+  });
   // labels carry as many decimals as the step needs: 0.5 steps read 20.5
-  const dec = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step) - 1e-9));
+  const dec = step >= 1 ? 0 : Math.min(3, -Math.floor(Math.log10(step) + 1e-9));
   const yt = [];
   for (let v = bottom; v <= top + step / 2; v += step) {
     yt.push({ f: 1 - (v - bottom) / (top - bottom), label: (Math.abs(v) < step / 1e6 ? 0 : v).toFixed(dec) });
@@ -4540,7 +4573,7 @@ function seriesPaths(series, hours, live, band, parts) {
   const xt = timeTicks(t0, now, (now - t0) / 3600e3);
   const grid = yt.map((t) => 'M0,' + (t.f * GRAPH_H).toFixed(1) + 'H' + GRAPH_W).join('') +
     xt.map((t) => 'M' + (t.f * GRAPH_W).toFixed(1) + ',0V' + GRAPH_H).join('');
-  return { line: line.join(''), area, grid, lo, hi, yt, xt };
+  return { paths, grid, lo, hi, yt, xt };
 }
 
 /* Tick labels are HTML over the SVG - text inside a viewBox stretched with
@@ -4555,7 +4588,7 @@ function placeTicks(box, ticks, axis, every, gapPx) {
     // The top value sits under its line and the rest above theirs, so with
     // the lines close together the next labelled one down gives way.
     const fromTop = ticks.length - 1 - i;
-    el.hidden = !t || fromTop % n !== 0 || (axis === 'y' && fromTop === n && n * (gapPx || 99) < 30);
+    el.hidden = !t || fromTop % n !== 0 || (axis === 'y' && fromTop === n && n * (gapPx || 99) < 34);
     if (!t) return;
     if (el.textContent !== t.label) el.textContent = t.label;
     if (axis === 'y') el.classList.toggle('top', i === ticks.length - 1);
@@ -4564,9 +4597,24 @@ function placeTicks(box, ticks, axis, every, gapPx) {
   });
 }
 
+/* Up to four lines: every band is drawn before any line, so no band ever
+   covers another sensor's line. */
+const GRAPH_MAX = 4;
 const GRAPH_SVG = `<svg viewBox="0 0 ${GRAPH_W} ${GRAPH_H}" preserveAspectRatio="none">
-  <path class="ggrid" d=""></path><path class="gband" d=""></path><path class="gline" d=""></path></svg>
+  <path class="ggrid" d=""></path>
+  ${'<path class="gband" d=""></path>'.repeat(GRAPH_MAX)}
+  ${'<path class="gline" d=""></path>'.repeat(GRAPH_MAX)}</svg>
   <div class="gyt"></div>`;
+
+/* Paint the slots: colour once per open/build, paths on every change. */
+function paintSlots(lineEls, bandEls, colours) {
+  lineEls.forEach((el, i) => { el.style.stroke = colours[i] || ''; });
+  bandEls.forEach((el, i) => { el.style.fill = colours[i] || ''; });
+}
+function drawSlots(lineEls, bandEls, paths) {
+  lineEls.forEach((el, i) => el.setAttribute('d', paths && paths[i] ? paths[i].line : ''));
+  bandEls.forEach((el, i) => el.setAttribute('d', paths && paths[i] ? paths[i].area : ''));
+}
 
 const GRAPH_CSS = `
 .ghead {
@@ -4581,6 +4629,13 @@ const GRAPH_CSS = `
   margin-top: 4px; font-size: 13px; color: var(--ns-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* several sensors: each value with its name in the colour of its line */
+.gmulti { display: flex; gap: 18px; min-width: 0; }
+.gm { min-width: 0; }
+.gm .gval { font-size: 30px; }
+.gm .gval small { font-size: 16px; }
+.gm .gname { display: flex; align-items: center; gap: 6px; }
+.gdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .grange {
   flex: none; text-align: right; font-size: 13px; line-height: 18px;
   color: var(--ns-muted); font-variant-numeric: tabular-nums;
@@ -4649,6 +4704,13 @@ const GRAPH_VIEW_CSS = `
   letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .tval small { font-size: 22px; font-weight: 600; opacity: .65; margin-left: 2px; }
 .trange { margin-top: 6px; font-size: 14px; color: var(--ns-muted); font-variant-numeric: tabular-nums; }
+.tmulti { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.tm { font-size: 26px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; }
+.tm small { font-size: 15px; font-weight: 600; opacity: .65; margin-left: 2px; }
+.tm .tn { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500;
+  letter-spacing: 0; color: var(--ns-muted); }
+.gdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .x {
   width: 56px; height: 56px; flex: none; border: 0; border-radius: 16px;
   background: rgba(255,255,255,.10); color: #f2f4f7; font-size: 30px; line-height: 56px;
@@ -4699,7 +4761,8 @@ class NsGraphView extends HTMLElement {
       <div class="scrim"></div>
       <div class="panel">
         <div class="top">
-          <div class="ttl"><div class="tname"></div><div class="tval"></div><div class="trange"></div></div>
+          <div class="ttl"><div class="tname"></div><div class="tval"></div><div class="trange"></div>
+            <div class="tmulti"></div></div>
           <button class="x" aria-label="Close">×</button>
         </div>
         <div class="plot">${GRAPH_SVG}<div class="empty" hidden></div></div>
@@ -4711,8 +4774,9 @@ class NsGraphView extends HTMLElement {
     this._name = q('.tname');
     this._val = q('.tval');
     this._range = q('.trange');
-    this._line = q('.gline');
-    this._band = q('.gband');
+    this._multi = q('.tmulti');
+    this._lines = Array.from(root.querySelectorAll('.gline'));
+    this._bands = Array.from(root.querySelectorAll('.gband'));
     this._empty = q('.empty');
     this._grid = q('.ggrid');
     this._yt = q('.gyt');
@@ -4728,15 +4792,36 @@ class NsGraphView extends HTMLElement {
 
   ownedBy(card) { return this._owner === card; }
 
-  /* opts: {entity, title, unit, decimals, hours, accent, owner, hass} */
+  /* opts: {items: [{entity, name, unit, decimals, color}], title, hours, band,
+     accent, owner, hass}. One item reads as the big value with its high and
+     low; several as a value per line, in the line's colour. */
   open(opts) {
     this._opts = opts;
+    this._items = (opts.items || []).slice(0, GRAPH_MAX);
     this._owner = opts.owner || null;
     this._hass = opts.hass;
     this._series = null;
     this._stamp = null;
-    this.style.setProperty('--ns-accent', opts.accent || '#7cc4ff');
-    this._name.textContent = opts.title || opts.entity;
+    const accent = opts.accent || '#7cc4ff';
+    this._colours = this._items.map((it, i) => graphColour(it, i, accent));
+    this.style.setProperty('--ns-accent', accent);
+    paintSlots(this._lines, this._bands, this._colours);
+    const single = this._items.length === 1;
+    this._name.textContent = opts.title || (single ? this._items[0].entity : '');
+    this._val.hidden = !single;
+    this._range.hidden = !single;
+    this._multi.hidden = single;
+    // built per open, which is a person pressing on the wall - not a render
+    this._multi.textContent = '';
+    this._cells = this._items.map((it, i) => {
+      const cell = document.createElement('div');
+      cell.className = 'tm';
+      cell.innerHTML = '<div class="tv"></div><div class="tn"><span class="gdot"></span><span></span></div>';
+      cell.querySelector('.gdot').style.background = this._colours[i];
+      cell.querySelector('.tn span:last-child').textContent = it.name || it.entity;
+      this._multi.appendChild(cell);
+      return cell.querySelector('.tv');
+    });
     const host = (window.NsPanelCards && window.NsPanelCards.sheetHost) || document.body;
     if (this.parentNode !== host) host.appendChild(this);
     requestAnimationFrame(() => this.classList.add('in'));
@@ -4746,8 +4831,14 @@ class NsGraphView extends HTMLElement {
   set hass(hass) {
     const prev = this._hass;
     this._hass = hass;
-    if (!this._opts || (prev && prev.states[this._opts.entity] === hass.states[this._opts.entity])) return;
+    if (!this._opts) return;
+    if (prev && this._items.every((it) => prev.states[it.entity] === hass.states[it.entity])) return;
     this._render();
+  }
+
+  _band() {
+    const b = this._opts.band;
+    return b === true || (b !== false && this._items.length === 1);
   }
 
   _setHours(h) {
@@ -4756,15 +4847,14 @@ class NsGraphView extends HTMLElement {
     this._series = null;
     this._empty.hidden = false;
     this._empty.textContent = 'Loading…';
-    this._line.setAttribute('d', '');
-    this._band.setAttribute('d', '');
+    drawSlots(this._lines, this._bands, null);
     this._grid.setAttribute('d', '');
     placeTicks(this._yt, [], 'y');
     placeTicks(this._xt, [], 'x');
     this._range.textContent = '';
     this._ask = (this._ask || 0) + 1;
     const ask = this._ask;
-    fetchSeries(this._hass, this._opts.entity, h).then((s) => {
+    fetchSeries(this._hass, this._items.map((it) => it.entity), h).then((s) => {
       if (ask !== this._ask || !this.isConnected) return;
       this._series = s;
       this._stamp = null;
@@ -4777,25 +4867,33 @@ class NsGraphView extends HTMLElement {
   }
 
   _render() {
-    const o = this._opts;
-    const s = this._hass && this._hass.states[o.entity];
-    const n = numeric(s);
-    const unit = o.unit == null ? unitOf(s) : o.unit;
-    const text = isBroken(s) ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, o.decimals));
-    this._val.innerHTML = unit && n !== null ? `${text}<small>${unit}</small>` : text;
+    const lives = this._items.map((it, i) => {
+      const s = this._hass && this._hass.states[it.entity];
+      const n = isBroken(s) ? null : numeric(s);
+      const unit = it.unit == null ? unitOf(s) : it.unit;
+      const text = isBroken(s) ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, it.decimals));
+      const html = unit && n !== null ? `${text}<small>${unit}</small>` : text;
+      if (this._items.length === 1) this._val.innerHTML = html;
+      else this._cells[i].innerHTML = html;
+      return n;
+    });
     if (!this._series) return;
-    const stamp = this._series.end + '|' + n;
+    const stamp = this._series.end + '|' + lives.join(',');
     if (stamp === this._stamp) return;
     this._stamp = stamp;
-    const p = seriesPaths(this._series, this._hours, n, true);
+    const p = seriesPaths(this._series, this._hours,
+      this._items.map((it, i) => ({ id: it.entity, live: lives[i] })), this._band());
     this._empty.hidden = !!p;
     if (!p) { this._empty.textContent = 'Home Assistant has no history for this'; return; }
-    this._line.setAttribute('d', p.line);
-    this._band.setAttribute('d', p.area);
+    drawSlots(this._lines, this._bands, p.paths);
     this._grid.setAttribute('d', p.grid);
-    placeTicks(this._yt, p.yt, 'y');
+    // one layout read per data change, not per frame: the plot's height
+    // decides whether the top two values have room for each other
+    const gap = (this._yt.clientHeight || 240) / Math.max(1, p.yt.length - 1);
+    placeTicks(this._yt, p.yt, 'y', 1, gap);
     placeTicks(this._xt, p.xt, 'x');
-    this._range.textContent = '↑ ' + fmt(p.hi, o.decimals) + '   ↓ ' + fmt(p.lo, o.decimals);
+    const dec = this._items[0].decimals;
+    this._range.textContent = '↑ ' + fmt(p.hi, dec) + '   ↓ ' + fmt(p.lo, dec);
   }
 
   close() {
@@ -4817,8 +4915,12 @@ class NsPanelGraphCard extends NsInfoCard {
   static get cardType() { return 'nspanel-graph-card'; }
   static get extraCss() { return GRAPH_CSS; }
   static get accent() { return '#7cc4ff'; }
+  static get requiresEntity() { return false; }
   static get defaultOptions() {
-    return { hours: 24, show_minmax: true, unit: null, decimals: null, long_press: 'graph' };
+    return {
+      entities: null, hours: 24, show_minmax: null, unit: null, decimals: null,
+      long_press: 'graph',
+    };
   }
 
   static getStubConfig(hass) {
@@ -4828,18 +4930,51 @@ class NsPanelGraphCard extends NsInfoCard {
     return { entity: found || 'sensor.example', height: 200 };
   }
 
+  setConfig(config) {
+    super.setConfig(config);
+    if (!this._items.length) {
+      throw new Error(`${this.constructor.cardType}: an "entity", or "entities", is required`);
+    }
+  }
+
+  /* `entity` for one sensor, `entities` for up to four on one scale: each
+     "sensor.x" or {entity, name, color}. unit and decimals are the card's. */
+  get _items() {
+    const c = this._config;
+    const list = Array.isArray(c.entities) && c.entities.length ? c.entities : (c.entity ? [c.entity] : []);
+    return list
+      .map((it) => (typeof it === 'string' ? { entity: it } : it))
+      .filter((it) => it && it.entity)
+      .slice(0, GRAPH_MAX)
+      .map((it) => Object.assign({ unit: c.unit, decimals: c.decimals }, it));
+  }
+
+  _entityIds() { return this._items.map((it) => it.entity); }
+
   get _hours() { return clamp(Number(this._config.hours) || 24, 1, 168); }
+
+  /* The min-max band: on for one sensor, off behind several, where the bands
+     would overlap into a smudge - unless show_minmax says otherwise. */
+  get _band() {
+    const b = this._config.show_minmax;
+    return b === true || (b !== false && this._items.length === 1);
+  }
 
   _build() {
     if (this._built || !this._config) return;
     this._built = true;
+    const items = this._items;
+    const single = items.length === 1;
     this.shadowRoot.innerHTML = `
       ${this._shell()}
         <div class="gwrap">${GRAPH_SVG}</div>
         <div class="gempty" hidden></div>
         <div class="content">
           <div class="ghead">
-            <div style="min-width:0"><div class="gval"></div><div class="gname"></div></div>
+            ${single
+              ? '<div style="min-width:0"><div class="gval"></div><div class="gname"></div></div>'
+              : `<div class="gmulti">${items.map(() =>
+                  '<div class="gm"><div class="gval"></div><div class="gname"><span class="gdot"></span><span></span></div></div>').join('')}</div>`}
             <div class="grange"><div class="ghi"></div><div class="glo"></div><div class="gspan"></div></div>
           </div>
         </div>
@@ -4847,19 +4982,34 @@ class NsPanelGraphCard extends NsInfoCard {
     `;
     const q = (s) => this.shadowRoot.querySelector(s);
     this._card = q('.card');
-    this._elVal = q('.gval');
-    this._elName = q('.gname');
+    this._colours = items.map((it, i) => graphColour(it, i, this._accent()));
+    this._vals = Array.from(this.shadowRoot.querySelectorAll('.gval'));
+    this._names = single ? [q('.gname')]
+      : Array.from(this.shadowRoot.querySelectorAll('.gname span:last-child'));
+    if (!single) {
+      Array.from(this.shadowRoot.querySelectorAll('.gdot'))
+        .forEach((d, i) => { d.style.background = this._colours[i]; });
+      // the high and low are one sensor's; with several, the values say it
+      q('.ghi').hidden = true;
+      q('.glo').hidden = true;
+    }
     this._elHi = q('.ghi');
     this._elLo = q('.glo');
     this._elEmpty = q('.gempty');
-    this._line = q('.gline');
-    this._band = q('.gband');
+    this._lines = Array.from(this.shadowRoot.querySelectorAll('.gline'));
+    this._bands = Array.from(this.shadowRoot.querySelectorAll('.gband'));
+    paintSlots(this._lines, this._bands, this._colours);
     this._grid = q('.ggrid');
     this._yt = q('.gyt');
     q('.gspan').textContent = graphLabel(this._hours);
-    this._bindMoreInfo(this._card);
+    this._bindMoreInfo(this._card, () => this._items[0].entity);
     if (this._config.long_press !== 'none') {
-      this._bindLongPress(this._card, () => this._openGraph(this._config.entity, this._hours));
+      this._bindLongPress(this._card, () => this._openGraph(
+        this._items.map((it, i) => Object.assign({}, it, {
+          name: it.name || friendly(this._state(it.entity), it.entity),
+          color: this._colours[i],
+        })),
+        this._hours, this._config.title || this._config.name || null, this._band));
     }
     this._watch();
   }
@@ -4902,7 +5052,7 @@ class NsPanelGraphCard extends NsInfoCard {
       else this._timer = setTimeout(() => this._fetch(), 300e3 - (Date.now() - this._series.end));
       return;
     }
-    fetchSeries(this._hass, this._config.entity, this._hours).then((s) => {
+    fetchSeries(this._hass, this._entityIds(), this._hours).then((s) => {
       this._series = s;
       this._pathStamp = null;
       this._failed = false;
@@ -4917,48 +5067,51 @@ class NsPanelGraphCard extends NsInfoCard {
 
   _render() {
     if (!this._card) return;
-    const cfg = this._config;
-    const s = this._stateObj;
-    const broken = isBroken(s);
-    const n = numeric(s);
-    const unit = cfg.unit == null ? unitOf(s) : cfg.unit;
-    const text = broken ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, cfg.decimals));
-    const shown = text + '|' + unit;
-    if (shown !== this._valShown) {
-      this._valShown = shown;
-      this._elVal.innerHTML = unit && !broken && n !== null ? `${text}<small>${unit}</small>` : text;
-    }
-    this._elName.textContent = this._title();
+    const items = this._items;
+    const lives = items.map((it, i) => {
+      const s = this._state(it.entity);
+      const broken = isBroken(s);
+      const n = broken ? null : numeric(s);
+      const unit = it.unit == null ? unitOf(s) : it.unit;
+      const text = broken ? '—' : (n === null ? (s ? s.state : '—') : fmt(n, it.decimals));
+      const shown = text + '|' + unit;
+      if (this._vals[i]._shown !== shown) {
+        this._vals[i]._shown = shown;
+        this._vals[i].innerHTML = unit && n !== null ? `${text}<small>${unit}</small>` : text;
+      }
+      this._names[i].textContent = items.length === 1 ? this._title()
+        : (it.name || friendly(s, it.entity));
+      return n;
+    });
 
     if (!this._series) {
       this._elEmpty.hidden = !this._failed;
       this._elEmpty.textContent = 'No history from Home Assistant';
       return;
     }
-    const stamp = this._series.end + '|' + n;
+    const stamp = this._series.end + '|' + lives.join(',');
     if (stamp === this._pathStamp) return;
     this._pathStamp = stamp;
-    const p = seriesPaths(this._series, this._hours, broken ? null : n, cfg.show_minmax !== false);
+    const p = seriesPaths(this._series, this._hours,
+      items.map((it, i) => ({ id: it.entity, live: lives[i] })), this._band);
     this._elEmpty.hidden = !!p;
     if (!p) {
       this._elEmpty.textContent = 'No history from Home Assistant';
-      this._line.setAttribute('d', '');
-      this._band.setAttribute('d', '');
+      drawSlots(this._lines, this._bands, null);
       this._grid.setAttribute('d', '');
       placeTicks(this._yt, [], 'y');
       this._elHi.textContent = '';
       this._elLo.textContent = '';
       return;
     }
-    this._line.setAttribute('d', p.line);
-    this._band.setAttribute('d', p.area);
+    drawSlots(this._lines, this._bands, p.paths);
     this._grid.setAttribute('d', p.grid);
     // labels need ~18px each: in a short card every other line keeps one
-    const graphH = Math.max(40, Number(cfg.height || 200) - 84);
+    const graphH = Math.max(40, Number(this._config.height || 200) - 84);
     const gap = graphH / Math.max(1, p.yt.length - 1);
     placeTicks(this._yt, p.yt, 'y', Math.max(1, Math.ceil(18 / gap)), gap);
-    this._elHi.textContent = '↑ ' + fmt(p.hi, cfg.decimals);
-    this._elLo.textContent = '↓ ' + fmt(p.lo, cfg.decimals);
+    this._elHi.textContent = '↑ ' + fmt(p.hi, this._config.decimals);
+    this._elLo.textContent = '↓ ' + fmt(p.lo, this._config.decimals);
   }
 }
 
@@ -5174,7 +5327,7 @@ const EDITOR_LABELS = {
   bar: 'Show the level as a bar',
   show_icons: 'Show icons',
   hours: 'Hours shown (1-168)',
-  show_minmax: 'Show the min-max band',
+  show_minmax: 'Min-max band (blank: only for one sensor)',
   only_problems: 'Only show what is wrong',
   columns: 'Columns',
   all_clear: 'All-clear text',
@@ -5423,6 +5576,14 @@ const SENSOR_SCHEMA = INFO_SCHEMA.concat([
 ]);
 
 const GRAPH_SCHEMA = INFO_SCHEMA.concat([
+  {
+    // several sensors on one scale; `entity` above is the one-sensor spelling
+    name: 'entities', selector: listOf({
+      entity: { required: true, selector: { entity: { domain: 'sensor' } } },
+      name: { selector: { text: {} } },
+      color: { selector: { text: {} } },
+    }, 'name', 'entity'),
+  },
   {
     name: '', type: 'grid', schema: [
       { name: 'hours', selector: { number: { min: 1, max: 168, step: 1, mode: 'box' } } },
@@ -5795,6 +5956,7 @@ class NsPanelSensorCardEditor extends NsBaseCardEditor {
 
 class NsPanelGraphCardEditor extends NsBaseCardEditor {
   static get cardType() { return 'nspanel-graph-card'; }
+  static get entityRequired() { return false; }
   static get rows() { return GRAPH_SCHEMA; }
   static get note() { return 'From Home Assistant\'s statistics: works for any sensor with a state class.'; }
 }
