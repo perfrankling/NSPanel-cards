@@ -116,7 +116,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.25.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.25.1`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -910,7 +910,9 @@ hours: 24
 
 The current value and name at the top, the high and low of the range on the right, and the
 graph across the bottom of the card: the mean per five minutes as a line, the minimum to
-maximum as a band behind it.
+maximum as a band behind it. Gridlines run at round values (labelled) and round times: every
+3 hours over a day, hourly over 6 hours, noon and midnight over 3 days, midnights over a week;
+the full-screen graph labels the times too.
 
 The data is Home Assistant's **statistics**, which the recorder already keeps for every sensor
 with a `state_class` (temperature, humidity, power and most others). That is a few hundred

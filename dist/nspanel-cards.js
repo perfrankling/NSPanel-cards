@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.25.0';
+const NSPANEL_VERSION = '0.25.1';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -4470,8 +4470,42 @@ function fetchSeries(hass, id, hours) {
   }, fromHistory);
 }
 
-/* The two path strings for a series over [now - hours, now], plus the range
-   they were scaled to. `live` (a number or null) extends the line to now. */
+/* A round step that cuts `range` into about `n` parts: 1, 2, 2.5 or 5 times a
+   power of ten, the way HA's own graphs and every chart library pick them. */
+function niceStep(range, n) {
+  const raw = range / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const f = raw / mag;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * mag;
+}
+
+const DAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/* Vertical grid lines at round local times: every hour over 6 h, every three
+   over a day, noon and midnight over three days, midnights over a week. */
+function timeTicks(t0, t1, hours) {
+  const every = hours <= 6 ? 1 : hours <= 24 ? 3 : hours <= 72 ? 12 : 24;
+  const d = new Date(t0);
+  d.setMinutes(0, 0, 0);
+  d.setHours(Math.ceil(d.getHours() / every) * every);
+  if (d.getTime() <= t0) d.setHours(d.getHours() + every);
+  const out = [];
+  while (d.getTime() < t1 && out.length < 40) {
+    const h = d.getHours();
+    out.push({
+      f: (d.getTime() - t0) / (t1 - t0),
+      label: every >= 24 || (every === 12 && h === 0) ? DAYS_SHORT[d.getDay()]
+        : String(h).padStart(2, '0') + ':00',
+    });
+    d.setHours(h + every);
+  }
+  return out;
+}
+
+/* The paths for a series over [now - hours, now], the grid behind it and the
+   ticks to label it with. The value range snaps outwards to round grid lines,
+   so the top and bottom of the graph are always labelled values. `live` (a
+   number or null) extends the line to now. */
 function seriesPaths(series, hours, live, band) {
   const now = Date.now();
   const t0 = now - clamp(Number(hours) || 24, 1, 168) * 3600e3;
@@ -4483,9 +4517,10 @@ function seriesPaths(series, hours, live, band) {
     hi = Math.max(hi, band ? p.hi : p.v);
   });
   if (live !== null) { lo = Math.min(lo, live); hi = Math.max(hi, live); }
-  const span = hi - lo || Math.max(Math.abs(hi) * 0.1, 1);
-  const top = hi + span * 0.08;
-  const bottom = lo - span * 0.08;
+  const step = niceStep(hi - lo || Math.max(Math.abs(hi) * 0.1, 1), 4);
+  let bottom = Math.floor(lo / step) * step;
+  let top = Math.ceil(hi / step) * step;
+  if (top - bottom < step) top = bottom + step;
   const x = (t) => (((t - t0) / (now - t0)) * GRAPH_W).toFixed(1);
   const y = (v) => (GRAPH_H - ((v - bottom) / (top - bottom)) * GRAPH_H).toFixed(1);
   const line = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.v));
@@ -4495,11 +4530,36 @@ function seriesPaths(series, hours, live, band) {
     area = pts.map((p, i) => (i ? 'L' : 'M') + x(p.t) + ',' + y(p.hi)).join('') +
       pts.slice().reverse().map((p) => 'L' + x(p.t) + ',' + y(p.lo)).join('') + 'Z';
   }
-  return { line: line.join(''), area, lo, hi };
+  // labels carry as many decimals as the step needs: 0.5 steps read 20.5
+  const dec = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step) - 1e-9));
+  const yt = [];
+  for (let v = bottom; v <= top + step / 2; v += step) {
+    yt.push({ f: 1 - (v - bottom) / (top - bottom), label: (Math.abs(v) < step / 1e6 ? 0 : v).toFixed(dec) });
+  }
+  const xt = timeTicks(t0, now, (now - t0) / 3600e3);
+  const grid = yt.map((t) => 'M0,' + (t.f * GRAPH_H).toFixed(1) + 'H' + GRAPH_W).join('') +
+    xt.map((t) => 'M' + (t.f * GRAPH_W).toFixed(1) + ',0V' + GRAPH_H).join('');
+  return { line: line.join(''), area, grid, lo, hi, yt, xt };
+}
+
+/* Tick labels are HTML over the SVG - text inside a viewBox stretched with
+   preserveAspectRatio="none" would stretch with it. A pool of spans, reused:
+   only textContent and one position change when the ticks move. */
+function placeTicks(box, ticks, axis) {
+  while (box.children.length < ticks.length) box.appendChild(document.createElement('span'));
+  Array.from(box.children).forEach((el, i) => {
+    const t = ticks[i];
+    el.hidden = !t;
+    if (!t) return;
+    if (el.textContent !== t.label) el.textContent = t.label;
+    const pos = (t.f * 100).toFixed(2) + '%';
+    if (axis === 'y') el.style.top = pos; else el.style.left = pos;
+  });
 }
 
 const GRAPH_SVG = `<svg viewBox="0 0 ${GRAPH_W} ${GRAPH_H}" preserveAspectRatio="none">
-  <path class="gband" d=""></path><path class="gline" d=""></path></svg>`;
+  <path class="ggrid" d=""></path><path class="gband" d=""></path><path class="gline" d=""></path></svg>
+  <div class="gyt"></div>`;
 
 const GRAPH_CSS = `
 .ghead {
@@ -4528,6 +4588,19 @@ const GRAPH_CSS = `
   vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round;
 }
 .gband { fill: var(--ns-accent); opacity: .16; }
+.ggrid { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.gyt { position: absolute; inset: 0; }
+.gyt span {
+  position: absolute; left: 8px; transform: translateY(25%);
+  font-size: 11px; line-height: 1; color: var(--ns-muted); font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 3px #16191f, 0 0 3px #16191f;
+}
+/* each value just under its line, so the top one stays inside the graph -
+   except the bottom line's, which goes above it for the same reason */
+.gyt span:first-child { transform: translateY(-125%); }
+/* the card's graph is short: the bottom value would sit on the next one up,
+   and the card's own edge says where the bottom is */
+.gyt span:first-child { display: none; }
 .gempty {
   position: absolute; left: 0; right: 0; bottom: 0; top: var(--ns-gtop, 84px);
   display: flex; align-items: center; justify-content: center;
@@ -4579,10 +4652,21 @@ const GRAPH_VIEW_CSS = `
 .gline { fill: none; stroke: var(--ns-accent); stroke-width: 3;
   vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
 .gband { fill: var(--ns-accent); opacity: .16; }
+.ggrid { fill: none; stroke: rgba(255,255,255,.09); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.gyt { position: absolute; inset: 0; pointer-events: none; }
+.gyt span {
+  position: absolute; left: 8px; transform: translateY(25%);
+  font-size: 12px; line-height: 1; color: var(--ns-muted); font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 3px #16191f, 0 0 3px #16191f;
+}
+/* each value just under its line, so the top one stays inside the graph -
+   except the bottom line's, which goes above it for the same reason */
+.gyt span:first-child { transform: translateY(-125%); }
 .empty { position: absolute; inset: 0; display: flex; align-items: center;
   justify-content: center; color: var(--ns-muted); font-size: 15px; }
-.axis { display: flex; justify-content: space-between; font-size: 13px;
+.axis { position: relative; height: 16px; margin-top: -4px; font-size: 12px;
   color: var(--ns-muted); font-variant-numeric: tabular-nums; }
+.axis span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
 .ranges { display: flex; gap: 10px; }
 .r {
   flex: 1; height: 52px; border: 0; border-radius: 14px; font-size: 17px; font-weight: 600;
@@ -4612,7 +4696,7 @@ class NsGraphView extends HTMLElement {
           <button class="x" aria-label="Close">×</button>
         </div>
         <div class="plot">${GRAPH_SVG}<div class="empty" hidden></div></div>
-        <div class="axis"><span class="from"></span><span class="span"></span><span>now</span></div>
+        <div class="axis"></div>
         <div class="ranges">${GRAPH_RANGES.map((r) =>
           `<button class="r" data-h="${r[0]}">${r[1]}</button>`).join('')}</div>
       </div>`;
@@ -4623,8 +4707,9 @@ class NsGraphView extends HTMLElement {
     this._line = q('.gline');
     this._band = q('.gband');
     this._empty = q('.empty');
-    this._from = q('.from');
-    this._span = q('.span');
+    this._grid = q('.ggrid');
+    this._yt = q('.gyt');
+    this._xt = q('.axis');
     this._btns = Array.from(root.querySelectorAll('.r'));
     q('.x').addEventListener('click', () => this.close());
     q('.scrim').addEventListener('click', () => this.close());
@@ -4661,13 +4746,14 @@ class NsGraphView extends HTMLElement {
   _setHours(h) {
     this._hours = h;
     this._btns.forEach((b) => b.classList.toggle('on', Number(b.dataset.h) === h));
-    this._span.textContent = '−' + graphLabel(h / 2);
-    this._from.textContent = '−' + graphLabel(h);
     this._series = null;
     this._empty.hidden = false;
     this._empty.textContent = 'Loading…';
     this._line.setAttribute('d', '');
     this._band.setAttribute('d', '');
+    this._grid.setAttribute('d', '');
+    placeTicks(this._yt, [], 'y');
+    placeTicks(this._xt, [], 'x');
     this._range.textContent = '';
     this._ask = (this._ask || 0) + 1;
     const ask = this._ask;
@@ -4699,6 +4785,9 @@ class NsGraphView extends HTMLElement {
     if (!p) { this._empty.textContent = 'Home Assistant has no history for this'; return; }
     this._line.setAttribute('d', p.line);
     this._band.setAttribute('d', p.area);
+    this._grid.setAttribute('d', p.grid);
+    placeTicks(this._yt, p.yt, 'y');
+    placeTicks(this._xt, p.xt, 'x');
     this._range.textContent = '↑ ' + fmt(p.hi, o.decimals) + '   ↓ ' + fmt(p.lo, o.decimals);
   }
 
@@ -4758,6 +4847,8 @@ class NsPanelGraphCard extends NsInfoCard {
     this._elEmpty = q('.gempty');
     this._line = q('.gline');
     this._band = q('.gband');
+    this._grid = q('.ggrid');
+    this._yt = q('.gyt');
     q('.gspan').textContent = graphLabel(this._hours);
     this._bindMoreInfo(this._card);
     if (this._config.long_press !== 'none') {
@@ -4846,12 +4937,16 @@ class NsPanelGraphCard extends NsInfoCard {
       this._elEmpty.textContent = 'No history from Home Assistant';
       this._line.setAttribute('d', '');
       this._band.setAttribute('d', '');
+      this._grid.setAttribute('d', '');
+      placeTicks(this._yt, [], 'y');
       this._elHi.textContent = '';
       this._elLo.textContent = '';
       return;
     }
     this._line.setAttribute('d', p.line);
     this._band.setAttribute('d', p.area);
+    this._grid.setAttribute('d', p.grid);
+    placeTicks(this._yt, p.yt, 'y');
     this._elHi.textContent = '↑ ' + fmt(p.hi, cfg.decimals);
     this._elLo.textContent = '↓ ' + fmt(p.lo, cfg.decimals);
   }
