@@ -958,6 +958,8 @@ Plus `title`, `height`, `accent`, `radius` and `more_info` (tap) as on every inf
 **Long-press for a graph.** Holding the graph card, a sensor card or one reading of a sensors
 card for half a second opens the same graph full-screen, with 6 h, 24 h, 3 d and 7 d to pick
 from; the X or a tap outside closes it. `long_press: none` on any of the three turns it off.
+In the native app, which has no more-info dialog, a **tap** on these cards opens the same graph
+(HA's more-info would have shown the history too); `more_info: false` turns that off.
 
 ### Status
 
