@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.29.0';
+const NSPANEL_VERSION = '0.30.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -505,6 +505,7 @@ const SHEET_CSS = `
 /* a muted player: the volume is still shown, in grey */
 :host(.muted) .tval { color: #8e939b; }
 .steps { display: flex; flex-direction: column; gap: 14px; flex: none; width: 96px; }
+.step.on { background: var(--ns-accent); color: #0b0d10; }
 .step {
   flex: 1;
   border: 0;
@@ -574,6 +575,7 @@ class NsSheet extends HTMLElement {
             <div class="tfill"></div><div class="tlab"></div><div class="tval"></div>
           </div>
           <div class="steps">
+            <button class="step top" hidden></button>
             <button class="step up" aria-label="Increase">+</button>
             <button class="step down" aria-label="Decrease">&minus;</button>
           </div>
@@ -593,6 +595,7 @@ class NsSheet extends HTMLElement {
     this._tiltVal = this._tilt.querySelector('.tval');
     this._tiltFill = this._tilt.querySelector('.tfill');
     this._tiltLab = this._tilt.querySelector('.tlab');
+    this._top = this.shadowRoot.querySelector('.step.top');
     this._up = this.shadowRoot.querySelector('.up');
     this._down = this.shadowRoot.querySelector('.down');
     this._active = { main: false, tilt: false };
@@ -607,6 +610,12 @@ class NsSheet extends HTMLElement {
       if (a) { haptic(this, 'light'); a.run(); } else this._step(sign * this._opts.step);
     };
     this._up.addEventListener('click', side('stepUp', +1));
+    // A third, above them, only when the card hands one over: the media card's
+    // mute, which lights up while the player is muted.
+    this._top.addEventListener('click', () => {
+      const a = this._opts.stepTop;
+      if (a) { haptic(this, 'light'); a.run(); }
+    });
     this._down.addEventListener('click', side('stepDown', -1));
 
     this._bindTrack(this._track, 'main');
@@ -616,6 +625,7 @@ class NsSheet extends HTMLElement {
   /* opts: {title, state, value 0..1, fromTop, step, accent, onInput(v), onCommit(v),
             onTap(), muted, owner, label, actions:[{label, icon, primary, run}],
             stepUp / stepDown: {icon, label, run} in place of the +/- steps,
+            stepTop: {icon, label, run, on} - a third button above them,
             tilt: {value 0..1, label, fromTop, onInput(v), onCommit(v)} - a second track } */
   open(opts) {
     this._opts = Object.assign({ step: 5, fromTop: false, accent: '#ffb74a' }, opts);
@@ -664,8 +674,8 @@ class NsSheet extends HTMLElement {
     this._tiltLab.textContent = tilt ? (tilt.label || '') : '';
     if (tilt && !this._active.tilt) this._setTilt(tilt.value);
 
-    const sideStamp = [opts.stepUp, opts.stepDown]
-      .map((a) => (a ? `${a.icon}|${a.label || ''}` : '')).join(';');
+    const sideStamp = [opts.stepUp, opts.stepDown, opts.stepTop]
+      .map((a) => (a ? `${a.icon}|${a.label || ''}|${a.on ? 1 : 0}` : '')).join(';');
     if (sideStamp !== this._sideShown) {
       this._sideShown = sideStamp;
       [[this._up, opts.stepUp, '+', 'Increase'], [this._down, opts.stepDown, '\u2212', 'Decrease']]
@@ -673,6 +683,13 @@ class NsSheet extends HTMLElement {
           el.innerHTML = a ? `<ha-icon icon="${a.icon}"></ha-icon>` : text;
           el.setAttribute('aria-label', a ? (a.label || label) : label);
         });
+      const top = opts.stepTop;
+      this._top.hidden = !top;
+      this._top.classList.toggle('on', !!(top && top.on));
+      if (top) {
+        this._top.innerHTML = `<ha-icon icon="${top.icon}"></ha-icon>`;
+        this._top.setAttribute('aria-label', top.label || '');
+      }
     }
 
     // Rebuilt only when what they say changes (play -> pause), not per render.
@@ -4052,6 +4069,12 @@ class NsPanelMediaCard extends NsBaseCard {
       value: this._displayValue(),
       muted: this._muted(),
       // a tap on the track mutes / unmutes, where the player can
+      stepTop: this._supports(MP_VOLUME_MUTE) ? {
+        icon: this._muted() ? 'mdi:volume-off' : 'mdi:volume-high',
+        label: this._muted() ? 'Unmute' : 'Mute',
+        on: this._muted(),
+        run: () => this._call('media_player', 'volume_mute', { is_volume_muted: !this._muted() }),
+      } : null,
       onTap: this._supports(MP_VOLUME_MUTE)
         ? () => this._call('media_player', 'volume_mute', { is_volume_muted: !this._muted() })
         : null,
