@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.28.0';
+const NSPANEL_VERSION = '0.29.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -1348,7 +1348,7 @@ class NsPanelCoverCard extends NsBaseCard {
   static get defaultOptions() {
     return {
       fill_direction: 'vertical', fill_style: 'tint',
-      show_icon: true, text_background: true, text_color: null,
+      show_icon: true, text_background: true, text_color: null, show_value: true,
     };
   }
 
@@ -1590,7 +1590,10 @@ class NsPanelCoverCard extends NsBaseCard {
     if (this._valueShown !== pct || this._movingShown !== moving) {
       this._valueShown = pct;
       this._movingShown = moving;
-      this._elValue.innerHTML = broken ? '&mdash;' : `${pct}<small>%</small>`;
+      // show_value: false leaves the number and its box out; the state line
+      // says "62% open" anyway
+      this._elValue.innerHTML = this._config.show_value === false ? ''
+        : (broken ? '&mdash;' : `${pct}<small>%</small>`);
       this._elSub.textContent = broken ? 'Unavailable' : this._stateText(s, pct);
     }
   }
@@ -3511,7 +3514,10 @@ class NsPanelClimateCard extends NsBaseCard {
   /* step in degrees, not percent - the base default of 5 would be absurd here.
      more_info because this card's tap opens the dialog instead of toggling. */
   static get defaultOptions() {
-    return { step: 0.5, more_info: true, min: null, max: null, show_icon: true, text_color: null };
+    return {
+      step: 0.5, more_info: true, min: null, max: null,
+      show_icon: true, text_color: null, show_value: true,
+    };
   }
   static get defaultPresets() {
     return [
@@ -3701,8 +3707,14 @@ class NsPanelClimateCard extends NsBaseCard {
     const stamp = `${target}|${off}|${broken}`;
     if (this._shown !== stamp) {
       this._shown = stamp;
-      this._elValue.innerHTML = broken || off ? '' : `${fmt(target, 1)}<small>&deg;</small>`;
-      this._elSub.textContent = broken ? 'Unavailable' : this._stateText(s);
+      // show_value: false leaves the target out of the corner - and puts it in
+      // the state line, the one place it would otherwise be missing from
+      const hide = cfg.show_value === false;
+      this._elValue.innerHTML = broken || off || hide ? '' : `${fmt(target, 1)}<small>&deg;</small>`;
+      const set = hide && !off && target !== null ? ` · set ${fmt(target, 1)}°` : '';
+      const st = this._stateText(s);
+      this._elSub.textContent = broken ? 'Unavailable'
+        : (set && st.indexOf('Now ') === 0 ? st.replace(' · ', set + ' · ') : st + set);
     }
   }
 }
@@ -3779,7 +3791,7 @@ class NsPanelMediaCard extends NsBaseCard {
     return {
       show_art: true, show_transport: true, more_info: false,
       fill_direction: 'vertical', fill_style: 'tint',
-      show_icon: true, text_background: true, text_color: null,
+      show_icon: true, text_background: true, text_color: null, show_value: true,
       volume_zoom: 0, volume_zoom_below: 25,
       tap_entity: null, tap_service: null, tap_data: null,
     };
@@ -4094,8 +4106,9 @@ class NsPanelMediaCard extends NsBaseCard {
       this._shown = stamp;
       const range = span < 1
         ? `<small class="range">0\u2013${Math.round(span * 100)}</small>` : '';
-      this._elValue.innerHTML = broken || idle || typeof a.volume_level !== 'number'
-        ? '' : `${pct}<small>%</small>${range}`;
+      // show_value: false leaves the volume to the fill
+      this._elValue.innerHTML = broken || idle || typeof a.volume_level !== 'number' ||
+        this._config.show_value === false ? '' : `${pct}<small>%</small>${range}`;
       this._elName.textContent = lines.top;
       this._elSub.textContent = lines.sub;
     }
@@ -5348,7 +5361,7 @@ const EDITOR_LABELS = {
   haptics: 'Haptics',
   more_info: 'Tap opens more-info',
   follow_color: 'Use the light\'s own colour',
-  show_value: 'Show the percentage',
+  show_value: 'Show the value',
   show_icon: 'Show the icon',
   text_background: 'Boxes behind the text (horizontal)',
   text_color: 'Text colour (hex or name, blank = white)',
@@ -5723,7 +5736,12 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
     ],
   },
   { name: 'more_info', selector: { boolean: {} } },
-  { name: 'show_icon', selector: { boolean: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'show_value', selector: { boolean: {} } },
+      { name: 'show_icon', selector: { boolean: {} } },
+    ],
+  },
   { name: 'text_color', selector: { text: {} } },
 ]);
 
@@ -5746,6 +5764,7 @@ const FILL_SCHEMA = [
   },
   {
     name: '', type: 'grid', schema: [
+      { name: 'show_value', selector: { boolean: {} } },
       { name: 'show_icon', selector: { boolean: {} } },
       { name: 'text_background', selector: { boolean: {} } },
     ],
@@ -5756,7 +5775,6 @@ const FILL_SCHEMA = [
 const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
-  { name: 'show_value', selector: { boolean: {} } },
 ], FILL_SCHEMA);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([
