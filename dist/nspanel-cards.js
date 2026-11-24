@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.27.0';
+const NSPANEL_VERSION = '0.28.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -909,6 +909,21 @@ class NsBaseCard extends HTMLElement {
     return this._config.title || this._config.name || friendly(s, this._config.entity);
   }
 
+  /* show_icon / text_background / text_color, as classes on .card (the rules
+     are in BASE_CSS) and the colour in its own property, so the icon - which
+     says on or off - keeps its colour. */
+  _lookClasses() {
+    const c = this._config;
+    return (c.show_icon === false ? ' noicon' : '') +
+      (c.text_background === false ? ' noplates' : '') +
+      (c.text_color ? ' tcol' : '');
+  }
+
+  _applyLook() {
+    // through setProperty, not the style attribute: it is the user's string
+    if (this._config.text_color) this._card.style.setProperty('--ns-tc', String(this._config.text_color));
+  }
+
   /* Value currently on screen: the local drag value wins while it is fresh,
      so a slow HA round-trip can never yank the fill back under your finger. */
   _displayValue() {
@@ -1165,10 +1180,7 @@ class NsPanelLightCard extends NsBaseCard {
     const cfg = this._config;
     const horizontal = this._horizontal();
     const classes = 'card' + (horizontal ? ' horizontal' : '')
-      + (cfg.fill_style === 'solid' ? ' solid' : '')
-      + (cfg.show_icon === false ? ' noicon' : '')
-      + (cfg.text_background === false ? ' noplates' : '')
-      + (cfg.text_color ? ' tcol' : '');
+      + (cfg.fill_style === 'solid' ? ' solid' : '') + this._lookClasses();
     // Same elements either way, so everything below finds them by class.
     const content = horizontal ? `
           <div class="row">
@@ -1206,8 +1218,7 @@ class NsPanelLightCard extends NsBaseCard {
     `;
 
     this._card = this.shadowRoot.querySelector('.card');
-    // through setProperty, not the style attribute: it is the user's string
-    if (cfg.text_color) this._card.style.setProperty('--ns-tc', String(cfg.text_color));
+    this._applyLook();
     this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
     this._elValue = this.shadowRoot.querySelector('.value');
     this._elName = this.shadowRoot.querySelector('.name');
@@ -1334,7 +1345,12 @@ class NsPanelCoverCard extends NsBaseCard {
   static get cardType() { return 'nspanel-cover-card'; }
   static get domain() { return 'cover'; }
   static get accent() { return '#7cc4ff'; }
-  static get defaultOptions() { return { fill_direction: 'vertical', fill_style: 'tint' }; }
+  static get defaultOptions() {
+    return {
+      fill_direction: 'vertical', fill_style: 'tint',
+      show_icon: true, text_background: true, text_color: null,
+    };
+  }
 
   static getStubConfig(hass) {
     const found = hass && hass.states
@@ -1372,7 +1388,7 @@ class NsPanelCoverCard extends NsBaseCard {
     const cfg = this._config;
     const horizontal = this._horizontal();
     const classes = 'card' + (horizontal ? ' horizontal' : '')
-      + (cfg.fill_style === 'solid' ? ' solid' : '');
+      + (cfg.fill_style === 'solid' ? ' solid' : '') + this._lookClasses();
     // the light card's layouts, element for element
     const content = horizontal ? `
           <div class="row">
@@ -1427,6 +1443,7 @@ class NsPanelCoverCard extends NsBaseCard {
     `;
 
     this._card = this.shadowRoot.querySelector('.card');
+    this._applyLook();
     this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
     this._elValue = this.shadowRoot.querySelector('.value');
     this._elName = this.shadowRoot.querySelector('.name');
@@ -3494,7 +3511,7 @@ class NsPanelClimateCard extends NsBaseCard {
   /* step in degrees, not percent - the base default of 5 would be absurd here.
      more_info because this card's tap opens the dialog instead of toggling. */
   static get defaultOptions() {
-    return { step: 0.5, more_info: true, min: null, max: null };
+    return { step: 0.5, more_info: true, min: null, max: null, show_icon: true, text_color: null };
   }
   static get defaultPresets() {
     return [
@@ -3562,7 +3579,7 @@ class NsPanelClimateCard extends NsBaseCard {
     const tint = tintStops(this._accent());
     this.shadowRoot.innerHTML = `
       <style>${BASE_CSS}</style>
-      <div class="card" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
+      <div class="card${this._lookClasses()}" style="--ns-height:${cfg.height}px;--ns-accent:${this._accent()};
         --ns-fill-strong:${tint.strong};--ns-fill-weak:${tint.weak}">
         <div class="fillwrap"><div class="fill"></div></div>
         <div class="badge" hidden>Offline</div>
@@ -3580,6 +3597,7 @@ class NsPanelClimateCard extends NsBaseCard {
       </div>
     `;
     this._card = this.shadowRoot.querySelector('.card');
+    this._applyLook();
     this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
     this._elValue = this.shadowRoot.querySelector('.value');
     this._elName = this.shadowRoot.querySelector('.name');
@@ -3761,6 +3779,7 @@ class NsPanelMediaCard extends NsBaseCard {
     return {
       show_art: true, show_transport: true, more_info: false,
       fill_direction: 'vertical', fill_style: 'tint',
+      show_icon: true, text_background: true, text_color: null,
       volume_zoom: 0, volume_zoom_below: 25,
       tap_entity: null, tap_service: null, tap_data: null,
     };
@@ -3889,7 +3908,7 @@ class NsPanelMediaCard extends NsBaseCard {
     const tint = tintStops(this._accent());
     const horizontal = this._horizontal();
     const classes = 'card' + (horizontal ? ' horizontal' : '')
-      + (cfg.fill_style === 'solid' ? ' solid' : '');
+      + (cfg.fill_style === 'solid' ? ' solid' : '') + this._lookClasses();
     // Same elements either way, so everything below finds them by class. The
     // horizontal one is the light card's layout: art/icon and text on one
     // plate, the volume on another, centred above the button rows.
@@ -3929,6 +3948,7 @@ class NsPanelMediaCard extends NsBaseCard {
       </div>
     `;
     this._card = this.shadowRoot.querySelector('.card');
+    this._applyLook();
     this._elArt = this.shadowRoot.querySelector('.art');
     this._elImg = this.shadowRoot.querySelector('.art img');
     this._elIconBox = this.shadowRoot.querySelector('.icon');
@@ -5703,6 +5723,8 @@ const CLIMATE_SCHEMA = SHARED_SCHEMA.concat([
     ],
   },
   { name: 'more_info', selector: { boolean: {} } },
+  { name: 'show_icon', selector: { boolean: {} } },
+  { name: 'text_color', selector: { text: {} } },
 ]);
 
 /* The light card is the only one whose accent can come from the entity. */
@@ -5722,12 +5744,6 @@ const FILL_SCHEMA = [
       { value: 'solid', label: 'Solid (exactly the accent colour)' },
     ] } },
   },
-];
-
-const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
-  { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
-  { name: 'follow_color', selector: { boolean: {} } },
-  { name: 'show_value', selector: { boolean: {} } },
   {
     name: '', type: 'grid', schema: [
       { name: 'show_icon', selector: { boolean: {} } },
@@ -5735,6 +5751,12 @@ const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
     ],
   },
   { name: 'text_color', selector: { text: {} } },
+];
+
+const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
+  { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
+  { name: 'follow_color', selector: { boolean: {} } },
+  { name: 'show_value', selector: { boolean: {} } },
 ], FILL_SCHEMA);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([

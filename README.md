@@ -116,7 +116,7 @@ That rules out `color-mix()` and CSS nesting; neither is used.
 ### Manual
 
 1. Copy `dist/nspanel-cards.js` to `/config/www/nspanel-cards.js`
-2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.27.0`, type
+2. Settings → Dashboards → ⋮ → Resources → `/local/nspanel-cards.js?v=0.28.0`, type
    **JavaScript module**
 
 Home Assistant caches `/local/` hard. Bump the `?v=` when you update, or you will be looking at
@@ -187,9 +187,6 @@ does not argue — and `follow_color: false` turns it off while leaving the defa
 | `fill_direction` | `vertical` | `horizontal` fills the card from the left, dims on a sideways drag and puts the name and state beside the icon, centred in height, with plates in the card's background colour under the icon + text and under the percentage, so they only show where the fill is; below `height: 160` there is no room for the presets and they are left out; the long-press sheet stays vertical |
 | `fill_style` | `tint` | `tint` is the colour translucent over the dark card, so the text stays readable; `solid` is the colour exactly as given, fully opaque |
 | `show_value` | `true` | `false` leaves out the big percentage (and its plate), which gives a narrow card's name and state the room; the state line still reads `On · 68%`, and the long-press sheet keeps its number |
-| `show_icon` | `true` | `false` leaves out the icon box; the percentage keeps its corner |
-| `text_background` | `true` | `false` drops the boxes behind the text in the horizontal layout, so it sits straight on the fill (with its shadow) |
-| `text_color` | white | the name, state line and percentage, as hex or a colour name (`'#1a1a1a'`, `black`); the icon keeps its colour |
 
 `fill_style: tint` lays the colour over the card at 62–34 % opacity, which shifts it: a yellow
 `accent` reads olive. Use `solid` when you want the colour you picked, and choose one the white
@@ -1072,6 +1069,9 @@ it - the same option, and the same meaning, as the app's screensaver clock.
 | `drag_travel` | card height | px of travel for the full range (card width with `fill_direction: horizontal`) |
 | `swipe_safe` | `true` | give drags across the fill back to the page (horizontal ones, or vertical ones with `fill_direction: horizontal`) |
 | `long_press` | `sheet` | or `none` |
+| `show_icon` | `true` | `false` leaves out the icon box (on the media card, album art is `show_art`'s); the value keeps its corner |
+| `text_background` | `true` | light, cover and media: `false` drops the boxes behind the text in the horizontal layout, so it sits straight on the fill (with its shadow) |
+| `text_color` | white | the name, state line and value, as hex or a colour name (`'#1a1a1a'`, `black`); the icon keeps its colour. Dark text reads only over the fill |
 | `long_press_ms` | `500` | |
 | `step` | `5` | the ± buttons in the full-screen control |
 | `haptics` | `true` | fires HA's `haptic` event |
