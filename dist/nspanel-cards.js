@@ -48,7 +48,7 @@
  * swiped from somewhere other than that card.
  */
 
-const NSPANEL_VERSION = '0.26.0';
+const NSPANEL_VERSION = '0.27.0';
 
 console.info(
   `%c NSPANEL-CARDS %c v${NSPANEL_VERSION} `,
@@ -337,6 +337,20 @@ const BASE_CSS = `
   background: var(--ns-surface);
 }
 .card.horizontal .value:empty { display: none; }
+
+/* The light card's look options. show_icon: false drops the icon box (the
+   value keeps its corner); text_background: false drops the plates, so the
+   text sits on the fill with only its shadow; text_color recolours the name,
+   state and value - not the icon, which says on or off. */
+.card.noicon .icon { display: none; }
+.card.noicon .row > .value { margin-left: auto; }
+.card.noicon .hplate { padding-left: 16px; }
+.card.noplates .hplate,
+.card.noplates.horizontal .value { background: none; }
+.card.noplates .hplate { padding-left: 0; }
+.card.noplates.horizontal .value { padding-right: 0; }
+.card.tcol .name, .card.tcol .value { color: var(--ns-tc); }
+.card.tcol .sub { color: var(--ns-tc); opacity: .72; }
 
 .presets {
   display: flex;
@@ -1079,7 +1093,10 @@ class NsPanelLightCard extends NsBaseCard {
   static get domain() { return 'light'; }
   static get accent() { return '#ffb74a'; }
   static get defaultOptions() {
-    return { follow_color: true, fill_direction: 'vertical', fill_style: 'tint', show_value: true };
+    return {
+      follow_color: true, fill_direction: 'vertical', fill_style: 'tint', show_value: true,
+      show_icon: true, text_background: true, text_color: null,
+    };
   }
 
   static getStubConfig(hass) {
@@ -1148,7 +1165,10 @@ class NsPanelLightCard extends NsBaseCard {
     const cfg = this._config;
     const horizontal = this._horizontal();
     const classes = 'card' + (horizontal ? ' horizontal' : '')
-      + (cfg.fill_style === 'solid' ? ' solid' : '');
+      + (cfg.fill_style === 'solid' ? ' solid' : '')
+      + (cfg.show_icon === false ? ' noicon' : '')
+      + (cfg.text_background === false ? ' noplates' : '')
+      + (cfg.text_color ? ' tcol' : '');
     // Same elements either way, so everything below finds them by class.
     const content = horizontal ? `
           <div class="row">
@@ -1186,6 +1206,8 @@ class NsPanelLightCard extends NsBaseCard {
     `;
 
     this._card = this.shadowRoot.querySelector('.card');
+    // through setProperty, not the style attribute: it is the user's string
+    if (cfg.text_color) this._card.style.setProperty('--ns-tc', String(cfg.text_color));
     this._elIcon = this.shadowRoot.querySelector('.icon ha-icon');
     this._elValue = this.shadowRoot.querySelector('.value');
     this._elName = this.shadowRoot.querySelector('.name');
@@ -5307,6 +5329,9 @@ const EDITOR_LABELS = {
   more_info: 'Tap opens more-info',
   follow_color: 'Use the light\'s own colour',
   show_value: 'Show the percentage',
+  show_icon: 'Show the icon',
+  text_background: 'Boxes behind the text (horizontal)',
+  text_color: 'Text colour (hex or name, blank = white)',
   fill_direction: 'Fill direction',
   fill_style: 'Fill style',
   clock_size: 'Clock digits (px, 24-160)',
@@ -5703,6 +5728,13 @@ const LIGHT_SCHEMA = SHARED_SCHEMA.concat([
   { name: 'presets', selector: listOf(PRESET_FIELDS.light, 'name', 'brightness_pct') },
   { name: 'follow_color', selector: { boolean: {} } },
   { name: 'show_value', selector: { boolean: {} } },
+  {
+    name: '', type: 'grid', schema: [
+      { name: 'show_icon', selector: { boolean: {} } },
+      { name: 'text_background', selector: { boolean: {} } },
+    ],
+  },
+  { name: 'text_color', selector: { text: {} } },
 ], FILL_SCHEMA);
 
 const COVER_SCHEMA = SHARED_SCHEMA.concat([
